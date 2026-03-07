@@ -235,13 +235,14 @@ Please see our main repository for contribution guidelines and to learn more abo
 
 ## Sponsors / Donate
 
-If you'd like to support ongoing development and maintenance, donations are appreciated. Add your preferred donation links here when ready.
+`nauticuvs` and the CESARops ecosystem are free for volunteer SAR teams, forever. If you'd like to help keep the project alive, any donation is appreciated — no amount is too small.
 
-- Cash App: `$nautidogsailing` (placeholder — confirm before publishing)
-- GitHub Sponsors: https://github.com/sponsors/festeraeb
-- Open Collective / Liberapay / PayPal: add your project page here
+| Platform | Link |
+|----------|------|
+| Cash App | [$nautidogsailing](https://cash.app/$nautidogsailing) |
+| GitHub Sponsors | [github.com/sponsors/festeraeb](https://github.com/sponsors/festeraeb) |
 
-Note: GitHub Sponsors and other donation platforms are typically linked to your GitHub profile or organization page; include whichever you enable. Keep the Cash App line only if you are comfortable accepting donations there.
+> **Note:** GitHub Sponsors is set up from your [GitHub profile → Sponsorship settings](https://github.com/sponsors). Once enabled, the Sponsors badge will appear automatically on this repo.
 
 ## References
 
