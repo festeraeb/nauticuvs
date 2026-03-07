@@ -1,0 +1,38 @@
+[package]
+name = "nauticuvs"
+version = "0.1.0"
+edition = "2021"
+authors = ["Thom Hadfield -- NautiDog Sailing"]
+description = "Fast Discrete Curvelet Transform (FDCT) via wrapping for 2D images"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/festeraeb/nauticuvs"
+readme = "README.md"
+homepage = "https://cesarops.com/"
+documentation = "https://docs.rs/nauticuvs"
+keywords = ["curvelet", "transform", "image-processing", "sonar", "signal-processing"]
+categories = ["science", "algorithms", "multimedia::images"]
+
+[dependencies]
+ndarray = "0.16"
+rustfft = "6.2"
+num-complex = "0.4"
+num-traits = "0.2"
+rayon = { version = "1.10", optional = true }
+thiserror = "2"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+approx = "0.5"
+rand = "0.8"
+
+[features]
+default = []
+parallel = ["rayon"]
+
+[[bench]]
+name = "transform"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = true
