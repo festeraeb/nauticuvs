@@ -4,7 +4,7 @@
 
 **Nauticuvs — Fast Discrete Curvelet Transform (FDCT)** — a pure-Rust implementation for 2D image analysis.
 
-This repository will be published as the `nauticuvs` crate. The project is part of the CESARops ecosystem and supports volunteer Search & Rescue (SAR) teams.
+Published on [crates.io](https://crates.io/crates/nauticuvs) as part of the CESARops ecosystem — supporting volunteer Search & Rescue (SAR) teams.
 
 ## What are curvelets?
 
@@ -235,14 +235,12 @@ Please see our main repository for contribution guidelines and to learn more abo
 
 ## Sponsors / Donate
 
-`nauticuvs` and the CESARops ecosystem are free for volunteer SAR teams, forever. If you'd like to help keep the project alive, any donation is appreciated — no amount is too small.
+`nauticuvs` and the CESARops ecosystem are free for volunteer SAR teams, forever. If you'd like to help keep the lights on, any contribution is appreciated.
 
 | Platform | Link |
 |----------|------|
 | Cash App | [$nautidogsailing](https://cash.app/$nautidogsailing) |
 | GitHub Sponsors | [github.com/sponsors/festeraeb](https://github.com/sponsors/festeraeb) |
-
-> **Note:** GitHub Sponsors is set up from your [GitHub profile → Sponsorship settings](https://github.com/sponsors). Once enabled, the Sponsors badge will appear automatically on this repo.
 
 ## References
 
