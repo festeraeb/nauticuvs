@@ -76,20 +76,6 @@ impl CurveletCoeffs {
         Ok(())
     }
 
-    /// Apply a function to every coefficient (in-place).
-    pub fn map_inplace<F>(&mut self, mut f: F)
-    where
-        F: FnMut(&mut Complex<f64>),
-    {
-        self.coarse.iter_mut().for_each(&mut f);
-        for scale in &mut self.detail {
-            for subband in scale {
-                subband.iter_mut().for_each(&mut f);
-            }
-        }
-        self.fine.iter_mut().for_each(&mut f);
-    }
-
     /// Hard thresholding on detail coefficients.
     ///
     /// Coefficients with magnitude below `threshold` are set to zero.
@@ -99,7 +85,7 @@ impl CurveletCoeffs {
             for subband in scale {
                 for c in subband.iter_mut() {
                     if c.abs() < threshold {
-                        *c = Complex::new(0.0, 0.0);
+                        *c = Complex::ZERO;
                     }
                 }
             }
@@ -115,7 +101,7 @@ impl CurveletCoeffs {
                 for c in subband.iter_mut() {
                     let mag = c.abs();
                     if mag < threshold {
-                        *c = Complex::new(0.0, 0.0);
+                        *c = Complex::ZERO;
                     } else {
                         *c *= (mag - threshold) / mag;
                     }

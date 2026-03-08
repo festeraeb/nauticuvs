@@ -22,7 +22,7 @@ pub fn fft2_inplace(data: &mut Array2<Complex<f64>>) {
 
     // Transform each column (copy out/in since columns aren't contiguous)
     let fft_col = planner.plan_fft_forward(rows);
-    let mut col_buf = vec![Complex::new(0.0f64, 0.0); rows];
+    let mut col_buf = vec![Complex::ZERO; rows];
     for c in 0..cols {
         for r in 0..rows {
             col_buf[r] = data[[r, c]];
@@ -46,7 +46,7 @@ pub fn ifft2_inplace(data: &mut Array2<Complex<f64>>) {
     }
 
     let ifft_col = planner.plan_fft_inverse(rows);
-    let mut col_buf = vec![Complex::new(0.0f64, 0.0); rows];
+    let mut col_buf = vec![Complex::ZERO; rows];
     for c in 0..cols {
         for r in 0..rows {
             col_buf[r] = data[[r, c]];

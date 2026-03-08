@@ -103,13 +103,7 @@ pub fn inverse_transform(coeffs: &CurveletCoeffs) -> Result<Array2<f32>, Curvele
         detail_windows.push(dirs_windows);
     }
 
-    for i in 0..n {
-        for j in 0..n {
-            if pou[[i, j]] < 1e-30 {
-                pou[[i, j]] = 1.0;
-            }
-        }
-    }
+    pou.mapv_inplace(|v| if v < 1e-30 { 1.0 } else { v });
 
     let inv_sqrt_pou = pou.mapv(|v| 1.0 / v.sqrt());
 

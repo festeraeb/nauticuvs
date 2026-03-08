@@ -39,10 +39,6 @@ pub struct CurveletConfig {
     /// `finest_scale_directions`. Each entry must be ≥ 4 and a multiple of 4.
     pub directions_per_scale: Option<Vec<usize>>,
 
-    /// If `true`, exploit conjugate symmetry of real input to halve computation.
-    /// **Currently ignored** — complex path is always used.
-    pub use_real_transform: bool,
-
     /// Original (unpadded) image dimensions, filled in during forward transform.
     /// Users should not set this.
     pub(crate) original_rows: usize,
@@ -64,7 +60,6 @@ impl CurveletConfig {
             num_scales,
             finest_scale_directions: 32,
             directions_per_scale: None,
-            use_real_transform: false,
             original_rows: 0,
             original_cols: 0,
             padded_size: 0,

@@ -51,7 +51,7 @@ pub fn forward_transform(
     let (orig_rows, orig_cols) = image.dim();
 
     let max_dim = orig_rows.max(orig_cols);
-    let n = utils::next_power_of_2(max_dim);
+    let n = max_dim.next_power_of_two();
     let padded = utils::zero_pad(image, n, n);
 
     let mut cfg = config.clone();
@@ -114,20 +114,12 @@ pub fn forward_transform(
     }
 
     // Clamp POU to avoid division by zero
-    for i in 0..n {
-        for j in 0..n {
-            if pou[[i, j]] < 1e-30 {
-                pou[[i, j]] = 1.0;
-            }
-        }
-    }
+    pou.mapv_inplace(|v| if v < 1e-30 { 1.0 } else { v });
 
     let inv_sqrt_pou = pou.mapv(|v| 1.0 / v.sqrt());
 
-    // --- Extract coarse coefficients ---
     let coarse_spec = extract_subband(&f_hat, &coarse_window, &inv_sqrt_pou, n);
 
-    // --- Extract detail coefficients (parallel over directions) ---
     let mut detail_coeffs: Vec<Vec<Array2<Complex<f64>>>> = Vec::with_capacity(num_detail);
     for scale_windows in &detail_windows {
         #[cfg(feature = "parallel")]
@@ -145,7 +137,6 @@ pub fn forward_transform(
         detail_coeffs.push(dir_coeffs);
     }
 
-    // --- Extract fine coefficients ---
     let fine_spec = extract_subband(&f_hat, &fine_window, &inv_sqrt_pou, n);
 
     Ok(CurveletCoeffs {

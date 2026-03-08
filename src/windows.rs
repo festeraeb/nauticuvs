@@ -130,16 +130,15 @@ pub fn build_radial_window(
         for j in 0..n {
             let r = radial[[i, j]];
             if r <= b_lo || r >= b_hi {
-                // Outside support
-            } else if r <= b_mid {
-                // Rising edge: ν(t) from 0 to 1
-                let t = (r - b_lo) / (b_mid - b_lo);
-                w[[i, j]] = meyer_nu(t).sqrt();
-            } else {
-                // Falling edge: 1 - ν(t) from 1 to 0
-                let t = (r - b_mid) / (b_hi - b_mid);
-                w[[i, j]] = (1.0 - meyer_nu(t)).sqrt();
+                continue;
             }
+            w[[i, j]] = if r <= b_mid {
+                let t = (r - b_lo) / (b_mid - b_lo);
+                meyer_nu(t).sqrt()
+            } else {
+                let t = (r - b_mid) / (b_hi - b_mid);
+                (1.0 - meyer_nu(t)).sqrt()
+            };
         }
     }
     w
@@ -172,11 +171,7 @@ pub fn build_angular_window(theta: &Array2<f64>, dir_idx: usize, num_dirs: usize
             }
 
             let abs_dt = dtheta.abs();
-            if abs_dt >= sector_width {
-                // Outside support
-            } else {
-                // Bell shape: 1 at center, 0 at ±sector_width
-                // w²(θ) = 1 - ν(|dθ| / sector_width)
+            if abs_dt < sector_width {
                 let t = abs_dt / sector_width;
                 w[[i, j]] = (1.0 - meyer_nu(t)).sqrt();
             }

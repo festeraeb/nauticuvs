@@ -1,36 +1,22 @@
 //! Utility functions: padding, frequency grids, power-of-2 helpers.
 
-use ndarray::Array2;
+use ndarray::{s, Array2};
 
 use crate::error::CurveletError;
-
-/// Round up to the next power of 2.
-#[inline]
-pub fn next_power_of_2(n: usize) -> usize {
-    n.next_power_of_two()
-}
 
 /// Pad a 2D f32 array to `(rows, cols)` with zeros.
 pub fn zero_pad(image: &Array2<f32>, rows: usize, cols: usize) -> Array2<f64> {
     let (orig_r, orig_c) = image.dim();
     let mut padded = Array2::zeros((rows, cols));
-    for r in 0..orig_r {
-        for c in 0..orig_c {
-            padded[[r, c]] = image[[r, c]] as f64;
-        }
-    }
+    padded
+        .slice_mut(s![..orig_r, ..orig_c])
+        .assign(&image.mapv(|v| v as f64));
     padded
 }
 
 /// Crop a 2D f64 array back to `(rows, cols)` and convert to f32.
 pub fn crop_to_f32(image: &Array2<f64>, rows: usize, cols: usize) -> Array2<f32> {
-    let mut out = Array2::zeros((rows, cols));
-    for r in 0..rows {
-        for c in 0..cols {
-            out[[r, c]] = image[[r, c]] as f32;
-        }
-    }
-    out
+    image.slice(s![..rows, ..cols]).mapv(|v| v as f32)
 }
 
 /// Validate that the image has non-zero dimensions and finite values.
@@ -62,14 +48,8 @@ pub fn freq_grid_1d_f64(n: usize) -> Vec<f64> {
 /// Generate 2D frequency grids (ξ_row, ξ_col) for an `n × n` FFT (f64).
 pub fn freq_grid_2d_f64(n: usize) -> (Array2<f64>, Array2<f64>) {
     let f1d = freq_grid_1d_f64(n);
-    let mut xi_row = Array2::zeros((n, n));
-    let mut xi_col = Array2::zeros((n, n));
-    for r in 0..n {
-        for c in 0..n {
-            xi_row[[r, c]] = f1d[r];
-            xi_col[[r, c]] = f1d[c];
-        }
-    }
+    let xi_row = Array2::from_shape_fn((n, n), |(r, _)| f1d[r]);
+    let xi_col = Array2::from_shape_fn((n, n), |(_, c)| f1d[c]);
     (xi_row, xi_col)
 }
 
