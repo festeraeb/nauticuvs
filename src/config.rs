@@ -73,7 +73,7 @@ impl CurveletConfig {
 
     /// Builder: set the finest-scale direction count.
     pub fn with_finest_directions(mut self, d: usize) -> Result<Self, CurveletError> {
-        if d < 4 || d % 4 != 0 {
+        if d < 4 || !d.is_multiple_of(4) {
             return Err(CurveletError::InvalidDirectionCount(d));
         }
         self.finest_scale_directions = d;
@@ -90,7 +90,7 @@ impl CurveletConfig {
             });
         }
         for &d in &dirs {
-            if d < 4 || d % 4 != 0 {
+            if d < 4 || !d.is_multiple_of(4) {
                 return Err(CurveletError::InvalidDirectionCount(d));
             }
         }

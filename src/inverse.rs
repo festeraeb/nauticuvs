@@ -85,16 +85,12 @@ pub fn inverse_transform(coeffs: &CurveletCoeffs) -> Result<Array2<f32>, Curvele
         #[cfg(feature = "parallel")]
         let dirs_windows: Vec<Array2<f64>> = (0..num_dirs)
             .into_par_iter()
-            .map(|l| {
-                windows::build_combined_window(&rad_w, &theta, l, num_dirs)
-            })
+            .map(|l| windows::build_combined_window(&rad_w, &theta, l, num_dirs))
             .collect();
 
         #[cfg(not(feature = "parallel"))]
         let dirs_windows: Vec<Array2<f64>> = (0..num_dirs)
-            .map(|l| {
-                windows::build_combined_window(&rad_w, &theta, l, num_dirs)
-            })
+            .map(|l| windows::build_combined_window(&rad_w, &theta, l, num_dirs))
             .collect();
 
         for w in &dirs_windows {
@@ -127,7 +123,9 @@ pub fn inverse_transform(coeffs: &CurveletCoeffs) -> Result<Array2<f32>, Curvele
             let contributions: Vec<Array2<Complex<f64>>> = scale_windows
                 .par_iter()
                 .zip(scale_coeffs.par_iter())
-                .map(|(w_arr, dir_coeffs)| subband_contribution(dir_coeffs, w_arr, &inv_sqrt_pou, n))
+                .map(|(w_arr, dir_coeffs)| {
+                    subband_contribution(dir_coeffs, w_arr, &inv_sqrt_pou, n)
+                })
                 .collect();
             for contrib in contributions {
                 for i in 0..n {

@@ -94,16 +94,12 @@ pub fn forward_transform(
         #[cfg(feature = "parallel")]
         let dirs_windows: Vec<Array2<f64>> = (0..num_dirs)
             .into_par_iter()
-            .map(|l| {
-                windows::build_combined_window(&rad_w, &theta, l, num_dirs)
-            })
+            .map(|l| windows::build_combined_window(&rad_w, &theta, l, num_dirs))
             .collect();
 
         #[cfg(not(feature = "parallel"))]
         let dirs_windows: Vec<Array2<f64>> = (0..num_dirs)
-            .map(|l| {
-                windows::build_combined_window(&rad_w, &theta, l, num_dirs)
-            })
+            .map(|l| windows::build_combined_window(&rad_w, &theta, l, num_dirs))
             .collect();
 
         // Accumulate into POU
