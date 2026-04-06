@@ -297,3 +297,273 @@ pub fn build_vrt_from_mission(
 
     VrtDataset::from_file(output_vrt_path).context("failed to parse generated VRT")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Post-slice quality: drift measurement + tile overlap detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Georeference drift report for a single tile.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TileDrift {
+    pub tile_id: String,
+    pub grid_col: usize,
+    pub grid_row: usize,
+    /// Expected origin lat (from VRT geo transform)
+    pub expected_lat: f64,
+    /// Expected origin lon (from VRT geo transform)
+    pub expected_lon: f64,
+    /// Actual origin lat (from sidecar anchor)
+    pub actual_lat: f64,
+    /// Actual origin lon (from sidecar anchor)
+    pub actual_lon: f64,
+    /// Drift distance in meters
+    pub drift_m: f64,
+}
+
+/// Tile overlap report.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TileOverlap {
+    pub tile_a_id: String,
+    pub tile_b_id: String,
+    pub tile_a_pos: (usize, usize),
+    pub tile_b_pos: (usize, usize),
+    /// Overlap area in square meters (0 = no overlap)
+    pub overlap_m2: f64,
+    /// Whether overlap exceeds expected tile boundary padding
+    pub excessive: bool,
+}
+
+/// Post-slice quality report.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VrtQualityReport {
+    pub tile_count: usize,
+    pub drift_samples: Vec<TileDrift>,
+    pub drift_stats: DriftStats,
+    pub overlaps: Vec<TileOverlap>,
+    pub excessive_overlap_count: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DriftStats {
+    pub mean_m: f64,
+    pub max_m: f64,
+    pub rms_m: f64,
+    pub p95_m: f64,
+    pub pass_threshold: f64,
+    pub passed: bool,
+}
+
+impl VrtTileSlicer {
+    /// Run post-slice drift measurement.
+    ///
+    /// Compares each tile's baked anchor coordinates against the expected
+    /// position from the VRT geo transform. Returns drift in meters.
+    pub fn measure_drift(
+        &self,
+        manifest: &VrtTileManifest,
+        pass_threshold_m: f64,
+    ) -> Vec<TileDrift> {
+        let gt = self.vrt.geo_transform;
+        let tile_size = self.tile_size as f64;
+
+        manifest
+            .tiles
+            .iter()
+            .map(|entry| {
+                // Expected position from VRT grid
+                let expected_lon =
+                    gt[0] + (entry.grid_col as f64 * tile_size * gt[1]);
+                let expected_lat =
+                    gt[3] + (entry.grid_row as f64 * tile_size * gt[5]);
+
+                // Actual position from sidecar anchor
+                let actual_lat = entry.origin_lat;
+                let actual_lon = entry.origin_lon;
+
+                // Haversine distance in meters
+                let drift_m = haversine_meters(
+                    expected_lat, expected_lon, actual_lat, actual_lon,
+                );
+
+                TileDrift {
+                    tile_id: entry.tile_id.clone(),
+                    grid_col: entry.grid_col,
+                    grid_row: entry.grid_row,
+                    expected_lat,
+                    expected_lon,
+                    actual_lat,
+                    actual_lon,
+                    drift_m,
+                }
+            })
+            .collect()
+    }
+
+    /// Detect tile overlaps by comparing bounding boxes.
+    ///
+    /// Tiles at adjacent grid positions should NOT overlap beyond their
+    /// expected boundaries. Excessive overlap indicates misalignment.
+    pub fn detect_overlaps(
+        &self,
+        manifest: &VrtTileManifest,
+    ) -> Vec<TileOverlap> {
+        let mut overlaps = Vec::new();
+        let tile_size = self.tile_size as f64;
+        let gt = self.vrt.geo_transform;
+
+        // Build a map of (col, row) → entry for neighbor lookups
+        let mut tile_map: std::collections::HashMap<(usize, usize), &VrtTileManifestEntry> =
+            std::collections::HashMap::new();
+        for entry in &manifest.tiles {
+            tile_map.insert((entry.grid_col, entry.grid_row), entry);
+        }
+
+        for entry in &manifest.tiles {
+            let col = entry.grid_col;
+            let row = entry.grid_row;
+
+            // Check east neighbor
+            if let Some(east) = tile_map.get(&(col + 1, row)) {
+                // Expected: this tile ends where east tile begins
+                // If actual boundaries overlap, report it
+                let this_east_lon = entry.origin_lon + tile_size * gt[1].abs();
+                let east_lon = east.origin_lon;
+                let overlap_lon = this_east_lon - east_lon;
+
+                let this_south_lat = entry.origin_lat + tile_size * gt[5].abs();
+                let east_south_lat = east.origin_lat + tile_size * gt[5].abs();
+                let overlap_lat = this_south_lat.min(east_south_lat) - entry.origin_lat.max(east.origin_lat);
+
+                if overlap_lon > 0.0 && overlap_lat > 0.0 {
+                    // Convert degree overlap to meters
+                    let mid_lat = (entry.origin_lat + east.origin_lat) / 2.0;
+                    let lon_m_per_deg = mid_lat.to_radians().cos() * 111_320.0;
+                    let lat_m_per_deg = 111_320.0;
+                    let overlap_m2 = overlap_lon * lon_m_per_deg * overlap_lat * lat_m_per_deg;
+
+                    // Expected overlap should be ~0 for adjacent non-overlapping tiles
+                    let excessive = overlap_m2 > (tile_size * 0.1).powi(2); // >10% tile area
+
+                    overlaps.push(TileOverlap {
+                        tile_a_id: entry.tile_id.clone(),
+                        tile_b_id: east.tile_id.clone(),
+                        tile_a_pos: (col, row),
+                        tile_b_pos: (col + 1, row),
+                        overlap_m2,
+                        excessive,
+                    });
+                }
+            }
+
+            // Check south neighbor
+            if let Some(south) = tile_map.get(&(col, row + 1)) {
+                let this_south_lat = entry.origin_lat + tile_size * gt[5].abs();
+                let south_lat = south.origin_lat;
+                let overlap_lat = this_south_lat - south_lat;
+
+                let this_east_lon = entry.origin_lon + tile_size * gt[1].abs();
+                let south_east_lon = south.origin_lon + tile_size * gt[1].abs();
+                let overlap_lon = this_east_lon.min(south_east_lon) - entry.origin_lon.max(south.origin_lon);
+
+                if overlap_lon > 0.0 && overlap_lat > 0.0 {
+                    let mid_lat = (entry.origin_lat + south.origin_lat) / 2.0;
+                    let lon_m_per_deg = mid_lat.to_radians().cos() * 111_320.0;
+                    let lat_m_per_deg = 111_320.0;
+                    let overlap_m2 = overlap_lon * lon_m_per_deg * overlap_lat * lat_m_per_deg;
+                    let excessive = overlap_m2 > (tile_size * 0.1).powi(2);
+
+                    overlaps.push(TileOverlap {
+                        tile_a_id: entry.tile_id.clone(),
+                        tile_b_id: south.tile_id.clone(),
+                        tile_a_pos: (col, row),
+                        tile_b_pos: (col, row + 1),
+                        overlap_m2,
+                        excessive,
+                    });
+                }
+            }
+        }
+
+        overlaps
+    }
+
+    /// Run full quality report: drift + overlap.
+    pub fn quality_report(
+        &self,
+        manifest: &VrtTileManifest,
+        drift_threshold_m: f64,
+    ) -> VrtQualityReport {
+        let drift_samples = self.measure_drift(manifest, drift_threshold_m);
+        let overlaps = self.detect_overlaps(manifest);
+
+        let drift_values: Vec<f64> = drift_samples.iter().map(|d| d.drift_m).collect();
+        let mut sorted = drift_values.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        let mean_m = if sorted.is_empty() {
+            0.0
+        } else {
+            sorted.iter().sum::<f64>() / sorted.len() as f64
+        };
+        let max_m = sorted.last().copied().unwrap_or(0.0);
+        let rms_m = if sorted.is_empty() {
+            0.0
+        } else {
+            (sorted.iter().map(|v| v * v).sum::<f64>() / sorted.len() as f64).sqrt()
+        };
+        let p95_idx = (sorted.len() as f64 * 0.95).ceil() as usize;
+        let p95_m = sorted.get(p95_idx.min(sorted.len() - 1)).copied().unwrap_or(0.0);
+        let excessive_count = overlaps.iter().filter(|o| o.excessive).count();
+
+        VrtQualityReport {
+            tile_count: manifest.tile_count,
+            drift_samples,
+            drift_stats: DriftStats {
+                mean_m,
+                max_m,
+                rms_m,
+                p95_m,
+                pass_threshold: drift_threshold_m,
+                passed: max_m <= drift_threshold_m,
+            },
+            overlaps,
+            excessive_overlap_count: excessive_count,
+        }
+    }
+}
+
+/// Haversine distance between two lat/lon points in meters.
+fn haversine_meters(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    const R: f64 = 6_371_000.0; // Earth radius in meters
+    let dlat = (lat2 - lat1).to_radians();
+    let dlon = (lon2 - lon1).to_radians();
+    let a = (dlat / 2.0).sin().powi(2)
+        + lat1.to_radians().cos() * lat2.to_radians().cos() * (dlon / 2.0).sin().powi(2);
+    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+    R * c
+}
+
+#[cfg(test)]
+mod drift_tests {
+    use super::*;
+
+    #[test]
+    fn test_haversine_chicago_milwaukee() {
+        // Chicago to Milwaukee ≈ 150km
+        let d = haversine_meters(41.8781, -87.6298, 43.0389, -87.9065);
+        assert!((d - 150_000.0).abs() < 5_000.0); // within 5km
+    }
+
+    #[test]
+    fn test_haversine_same_point() {
+        let d = haversine_meters(43.0, -86.5, 43.0, -86.5);
+        assert!(d < 0.01);
+    }
+
+    #[test]
+    fn test_haversine_10m_offset() {
+        // ~10m offset in latitude
+        let d = haversine_meters(43.0, -86.5, 43.0 + 0.0001, -86.5);
+        assert!((d - 11.0).abs() < 2.0);
+    }
+}

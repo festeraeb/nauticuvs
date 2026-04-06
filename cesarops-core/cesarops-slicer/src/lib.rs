@@ -29,7 +29,10 @@ pub mod spec;
 pub use io::geotiff::MmapGeoTiff;
 pub use io::vrt::{VrtDataset, VrtNormalizer, VrtSource, ResampleMethod};
 pub use tiles::slicer::TileSlicer;
-pub use tiles::vrt_slicer::{VrtTileSlicer, VrtSlicedTile, VrtTileManifest, build_vrt_from_mission};
+pub use tiles::vrt_slicer::{
+    VrtTileSlicer, VrtSlicedTile, VrtTileManifest, VrtQualityReport,
+    TileDrift, TileOverlap, DriftStats, build_vrt_from_mission,
+};
 pub use tiles::anchor::{AnchorCalculator, TileAnchor};
 pub use spec::mission::{MissionSpec, ModuleSpec, OutputStrategy};
 pub use spec::delegate::DelegateTarget;

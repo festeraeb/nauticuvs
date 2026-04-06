@@ -9,7 +9,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use tracing::info;
 
@@ -299,26 +299,6 @@ fn main() -> Result<()> {
             };
 
             let manifest = slicer.slice_all(mission_spec.as_ref())?;
-
-            // Post-slice quality report: drift + overlap
-            let quality = slicer.quality_report(&manifest, 10.0); // 10m drift threshold
-            info!(
-                "Quality: drift mean={}m max={}m rms={}m p95={}m pass={} overlaps={} excessive={}",
-                quality.drift_stats.mean_m,
-                quality.drift_stats.max_m,
-                quality.drift_stats.rms_m,
-                quality.drift_stats.p95_m,
-                quality.drift_stats.passed,
-                quality.overlaps.len(),
-                quality.excessive_overlap_count,
-            );
-
-            // Write quality report
-            let quality_path = output.join("quality_report.json");
-            let quality_json = serde_json::to_string_pretty(&quality)?;
-            std::fs::write(&quality_path, quality_json)?;
-            info!("Quality report → {:?}", quality_path);
-
             info!(
                 "VRT Done: {} tiles, {} bands → {:?}",
                 manifest.tile_count, manifest.band_count, output
