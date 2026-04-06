@@ -2,3 +2,4 @@
 
 pub mod slicer;
 pub mod anchor;
+pub mod vrt_slicer;
