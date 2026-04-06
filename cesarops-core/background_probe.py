@@ -163,6 +163,66 @@ def run_probe(wreck_id: str, wreck: dict, probe: dict, zscore: float = 2.5) -> d
 
 # ── Qwen-Assisted Parameter Tuning ───────────────────────────────────────────
 
+# Warp tuning config — saved between sessions
+WARP_CONFIG_FILE = Path(__file__).parent / "warp_config.json"
+
+def load_warp_config() -> dict:
+    """Load warp config (working_memory_mb, block_size)."""
+    if WARP_CONFIG_FILE.exists():
+        return json.loads(WARP_CONFIG_FILE.read_text())
+    return {"working_memory_mb": 4000, "block_size": 512, "resampling": "lanczos"}
+
+def save_warp_config(cfg: dict):
+    WARP_CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
+
+
+def qwen_tune_warp_params(warp_result: dict, probe_results: list) -> dict:
+    """Ask Qwen to tune GDAL warp parameters based on warp performance."""
+    if not QWEN_API_KEY:
+        return {}
+
+    current = load_warp_config()
+    duration = warp_result.get("duration_s", 0)
+    gpu_accel = warp_result.get("gpu_accelerated", False)
+
+    messages = [
+        {"role": "system", "content": (
+            "You tune GDAL warp parameters for a Quadro P1000 (4GB VRAM).\n"
+            "Only return JSON: "
+            '{"working_memory_mb": N, "block_size": N, "resampling": "lanczos|bilinear|cubic", '
+            '"notes": "..."}. '
+            "Rules: wm=4000 is max, drop to 2000 if GPU is shared with other tasks. "
+            "block_size=512 is default, 256 for fast mmap, 1024 for fewer I/O ops. "
+            "Lanczos = best quality but slowest. Bilinear = fast but lower quality."
+        )},
+        {"role": "user", "content": (
+            f"Current: wm={current['working_memory_mb']}MB, block={current['block_size']}, "
+            f"resample={current.get('resampling', 'lanczos')}\n"
+            f"Warp duration: {duration:.1f}s, GPU accelerated: {gpu_accel}\n"
+            f"Probe results: {len(probe_results)} sensors, "
+            f"{sum(1 for r in probe_results if r.get('status') == 'success')} succeeded"
+        )},
+    ]
+
+    try:
+        import requests
+        url = f"{QWEN_BASE_URL}/chat/completions"
+        resp = requests.post(url, headers={
+            "Authorization": f"Bearer {QWEN_API_KEY}",
+            "Content-Type": "application/json",
+        }, json={"model": QWEN_MODEL, "messages": messages, "temperature": 0.3}, timeout=30)
+        resp.raise_for_status()
+        raw = resp.json()["choices"][0]["message"]["content"].strip()
+        if raw.startswith("```"):
+            nl = raw.index("\n")
+            raw = raw[nl + 1:]
+            if raw.endswith("```"):
+                raw = raw[:-3].strip()
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+
 def qwen_analyze_results(wreck_name: str, probe_results: list) -> dict:
     """Send probe results to Qwen for parameter tuning recommendations."""
     if not QWEN_API_KEY:

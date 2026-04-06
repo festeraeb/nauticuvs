@@ -4,6 +4,14 @@
 //! to the 10m Sentinel-2 grid. This is the "Monster Hunter" baseline —
 //! high-quality Lanczos resampling that prevents aliasing artifacts
 //! in the Curvelet spine-locking and thermal cold-sink detection.
+//!
+//! The warp writes a Unified Master TIFF (all bands aligned) back
+//! to the G-Armor for the Pi to slice.
+//!
+//! Tunable parameters:
+//!   - working_memory_mb: VRAM budget (default 4000 for P1000)
+//!   - block_size: internal tile size for faster mmap access
+//!   - If "GPU out of memory", Qwen can lower working_memory_mb to 2000
 
 use std::path::Path;
 use std::process::Command;
@@ -32,6 +40,39 @@ pub struct WarpResult {
     pub duration_s: f64,
     pub resampling: String,
     pub gpu_accelerated: bool,
+    pub working_memory_mb: u32,
+    pub block_size: u32,
+}
+
+/// GDAL warp configuration — tunable by Qwen.
+pub struct WarpConfig {
+    /// Working memory in MB (VRAM budget). Default: 4000 for P1000.
+    /// If OOM, Qwen can lower this to 2000.
+    pub working_memory_mb: u32,
+
+    /// Internal block size for tiled output. Default: 512.
+    /// Smaller blocks = faster mmap reads, larger = fewer I/O ops.
+    pub block_size: u32,
+}
+
+impl Default for WarpConfig {
+    fn default() -> Self {
+        Self {
+            working_memory_mb: 4000,
+            block_size: 512,
+        }
+    }
+}
+
+impl WarpConfig {
+    /// Conservative config for when GPU is also running probe logic.
+    /// Leaves 2GB VRAM free for other tasks.
+    pub fn conservative() -> Self {
+        Self {
+            working_memory_mb: 2000,
+            block_size: 512,
+        }
+    }
 }
 
 /// Execute GPU-accelerated warp via gdalwarp CLI.
@@ -42,6 +83,16 @@ pub fn gpu_warp<P: AsRef<Path>>(
     input: P,
     output: P,
     bounds: Option<(f64, f64, f64, f64)>,
+) -> Result<WarpResult, WarpError> {
+    gpu_warp_with_config(input, output, bounds, WarpConfig::default())
+}
+
+/// Execute GPU-accelerated warp with custom configuration.
+pub fn gpu_warp_with_config<P: AsRef<Path>>(
+    input: P,
+    output: P,
+    bounds: Option<(f64, f64, f64, f64)>,
+    config: WarpConfig,
 ) -> Result<WarpResult, WarpError> {
     let input = input.as_ref();
     let output = output.as_ref();
@@ -67,14 +118,16 @@ pub fn gpu_warp<P: AsRef<Path>>(
     cmd.arg("-wo").arg("USE_OPENCL=TRUE");
     cmd.arg("-wo").arg("NUM_THREADS=ALL_CPUS");
 
-    // Working memory: 4GB to match P1000 VRAM
-    cmd.arg("-wm").arg("4000");
+    // Working memory: tunable VRAM budget
+    cmd.arg("-wm").arg(format!("{}", config.working_memory_mb));
 
     // Parallel I/O
     cmd.arg("-multi");
 
-    // Output options
+    // Output: internally tiled for faster mmap access
     cmd.arg("-co").arg("TILED=YES");
+    cmd.arg("-co").arg(format!("BLOCKXSIZE={}", config.block_size));
+    cmd.arg("-co").arg(format!("BLOCKYSIZE={}", config.block_size));
     cmd.arg("-co").arg("COMPRESS=DEFLATE");
 
     // Optional bounding box
@@ -107,6 +160,8 @@ pub fn gpu_warp<P: AsRef<Path>>(
         duration_s: duration,
         resampling: "lanczos".to_string(),
         gpu_accelerated: true,
+        working_memory_mb: config.working_memory_mb,
+        block_size: config.block_size,
     })
 }
 
@@ -127,5 +182,15 @@ mod tests {
     fn test_gdal_version_check() {
         let available = check_gpu_warp_available();
         println!("GDAL available: {}", available);
+    }
+
+    #[test]
+    fn test_config_defaults() {
+        let cfg = WarpConfig::default();
+        assert_eq!(cfg.working_memory_mb, 4000);
+        assert_eq!(cfg.block_size, 512);
+
+        let cons = WarpConfig::conservative();
+        assert_eq!(cons.working_memory_mb, 2000);
     }
 }
