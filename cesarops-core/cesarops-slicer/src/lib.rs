@@ -28,6 +28,8 @@ pub mod spec;
 
 pub use io::geotiff::MmapGeoTiff;
 pub use io::vrt::{VrtDataset, VrtNormalizer, VrtSource, ResampleMethod};
+pub use io::gdal_warp::{gpu_warp, check_gpu_warp_available, WarpResult};
+pub use io::watcher::PreprocessWatcher;
 pub use tiles::slicer::TileSlicer;
 pub use tiles::vrt_slicer::{
     VrtTileSlicer, VrtSlicedTile, VrtTileManifest, VrtQualityReport,

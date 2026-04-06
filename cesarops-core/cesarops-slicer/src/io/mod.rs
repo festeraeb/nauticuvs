@@ -2,3 +2,5 @@
 
 pub mod geotiff;
 pub mod vrt;
+pub mod gdal_warp;
+pub mod watcher;
