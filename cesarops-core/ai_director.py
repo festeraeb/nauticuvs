@@ -143,6 +143,12 @@ AVAILABLE_TOOLS = {
 SYSTEM_PROMPT = """\
 You are the AI Director for CESAROPS — a multi-sensor wreck detection system for the Great Lakes.
 
+IMPORTANT: Your job is to TUNE existing tool parameters. You are NOT allowed to write new code,
+create new scripts, or build new tools. Only adjust the knobs on existing tools:
+bounding boxes, sensitivity values, z-score thresholds, tile sizes, delegate assignments,
+resampling methods, and which tools to run. If you think new code is needed, say so
+explicitly and WAIT for human approval before generating any code.
+
 The user gives you a natural language request. You must respond with ONLY a JSON object
 (no markdown, no explanation) in this exact schema:
 
@@ -254,7 +260,9 @@ def interpret_results_with_qwen(results: List[Dict], config: Dict) -> str:
             "Review the CESAROPS sensor probe results below and provide:\n"
             "1. A brief executive summary of what was found\n"
             "2. Key anomalies worth investigating\n"
-            "3. Recommended next steps (which sensors to re-run, with adjusted params)\n"
+            "3. Recommended next steps — ONLY parameter adjustments on existing tools "
+            "(e.g., 'raise thermal_zscore to 3.0', 'narrow bbox to ...', 'add SAR sensor'). "
+            "Do NOT suggest writing new code or new tools without explicit human approval.\n"
             "4. Confidence assessment of any detected targets\n"
             "Be concise. Use bullet points."
         )},
@@ -474,7 +482,9 @@ def main():
                     "Review these CESAROPS sensor results and provide:\n"
                     "1. Executive summary\n"
                     "2. Key anomalies to investigate\n"
-                    "3. Recommended next steps\n"
+                    "3. Recommended next steps — ONLY parameter adjustments on existing tools "
+                    "(e.g., 'raise thermal_zscore to 3.0', 'add SAR sensor'). "
+                    "Do NOT suggest writing new code or new tools without explicit human approval.\n"
                     "Be concise, use bullet points."
                 )},
                 {"role": "user", "content": json.dumps(results_data, indent=2)[:4000]},

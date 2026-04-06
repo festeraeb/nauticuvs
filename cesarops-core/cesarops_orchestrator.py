@@ -85,6 +85,8 @@ def llm_generate_sensor_plan(user_request: str) -> dict:
     system_msg = (
         f"You are the CESAROPS sensor orchestrator. "
         f"Given a user request, choose the right sensors, area, and thresholds.\n\n"
+        f"IMPORTANT: You are ONLY allowed to tune existing parameters — area, sensor list, "
+        f"and threshold values. Do NOT write new code or create new tools.\n\n"
         f"Available areas: {areas_json}\n"
         f"Available sensors: thermal, nir_swir, sar, swot\n\n"
         f"Respond with ONLY valid JSON matching this schema:\n"
@@ -119,7 +121,9 @@ def llm_interpret_results(results: list, config: dict) -> str:
             "Review these CESAROPS sensor probe results and provide:\n"
             "1. Executive summary\n"
             "2. Key anomalies to investigate\n"
-            "3. Recommended next steps (which sensors to re-run, adjusted thresholds)\n"
+            "3. Recommended next steps — ONLY parameter adjustments on existing tools "
+            "(e.g., 'raise thermal_zscore to 3.0', 'add sar sensor', 'narrow bbox'). "
+            "Do NOT suggest writing new code or new tools without explicit human approval.\n"
             "Be concise, use bullet points."
         )},
         {"role": "user", "content": (
