@@ -1,25 +1,23 @@
 #!/usr/bin/env python3
 """
-AI DIRECTOR - Tool Picker & Parameter Adjuster
+AI DIRECTOR — Qwen-Powered Tool Picker, Parameter Tuner & Data Interpreter
 
-This is "little brother" - the director that:
-1. Takes user requests (natural language or UI commands)
-2. Picks the right tools
-3. Sets bounding boxes
-4. Adjusts parameters (sensitivity, thresholds)
-5. Calls the tools
-6. Returns consolidated results
-
-Can use LOCAL LLM API (Kobold/Ollama) for reasoning!
+What it does:
+1. Takes user requests (natural language)
+2. Calls Qwen LLM to pick tools, set bounding boxes, tune parameters
+3. Executes the tools
+4. Sends results back to Qwen for interpretation & next-step recommendations
 
 Usage:
     python ai_director.py --request "Search for Gilcher near Fox Islands"
-    python ai_director.py --api http://localhost:5001 --request "Find triple locks at Beaver Islands"
+    python ai_director.py --request "Find triple locks at Beaver Islands" --execute
     python ai_director.py --bbox 45.8,-84.6,46.0,-84.4 --tools thermal,optical --sensitivity 1.5
+    python ai_director.py --interpret outputs/probes/*.json
 """
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import requests
@@ -27,14 +25,29 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
 
-# Local LLM API endpoints
-LLM_APIS = {
-    'kobold': 'http://localhost:5001/api/v1/generate',
-    'ollama': 'http://localhost:11434/api/generate',
-    'lmstudio': 'http://localhost:1234/v1/chat/completions',
-}
+# ── API Key Loading ───────────────────────────────────────────────────────────
 
-# Bounding box presets for known wreck locations
+def load_env(path: Path) -> Dict[str, str]:
+    """Parse a simple .env file into a dict."""
+    env = {}
+    if path.exists():
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith('#') or '=' not in line:
+                continue
+            key, _, val = line.partition('=')
+            env[key.strip()] = val.strip()
+    return env
+
+_dotenv = load_env(Path(__file__).parent / ".env")
+QWEN_API_KEY = os.environ.get("QWEN_API_KEY", _dotenv.get("QWEN_API_KEY", ""))
+QWEN_MODEL = os.environ.get("QWEN_MODEL", _dotenv.get("QWEN_MODEL", "qwen-plus"))
+QWEN_BASE_URL = os.environ.get("QWEN_BASE_URL", _dotenv.get("QWEN_BASE_URL",
+    "https://dashscope.aliyuncs.com/compatible-mode/v1"))
+
+
+# ── Bounding box presets ─────────────────────────────────────────────────────
+
 BOUNDING_BOXES = {
     'fox_islands': {
         'name': 'Fox Islands',
@@ -74,240 +87,296 @@ BOUNDING_BOXES = {
     },
 }
 
-# Available tools with metadata
+# ── Tool metadata (sent to Qwen as reference) ────────────────────────────────
+
 AVAILABLE_TOOLS = {
     'thermal': {
         'script': 'lake_michigan_scan.py',
         'description': 'Thermal cold-sink detection (Landsat B10/B11)',
-        'usage': 'python lake_michigan_scan.py --sensitivity 1.5',
         'default_threshold': 2.5,
         'best_for': ['steel masses', 'large vessels', 'engine blocks'],
-        'data_source': 'Landsat-8/9 B10/B11 thermal bands',
         'resolution': '100m/pixel',
-        'depth_limit': 'Up to 300ft depth',
     },
     'optical': {
         'script': 'lake_michigan_scan.py',
         'description': 'Optical glint detection (Sentinel-2 B04/B08)',
-        'usage': 'python lake_michigan_scan.py --sensitivity 1.5',
         'default_threshold': 2.0,
         'best_for': ['aluminum', 'aircraft', 'surface debris'],
-        'data_source': 'Sentinel-2 B04/B08 optical bands',
         'resolution': '10m/pixel',
-        'depth_limit': 'Surface/near-surface only',
     },
     'sar': {
         'script': 'lake_michigan_scan.py',
         'description': 'SAR VV/VH ratio (Sentinel-1)',
-        'usage': 'Requires Sentinel-1 SAR data download',
         'default_threshold': 2.0,
         'best_for': ['heavy steel', 'dense masses', 'submerged structures'],
-        'data_source': 'Sentinel-1 VV/VH polarization',
         'resolution': '20m/pixel',
-        'depth_limit': 'Penetrates water column',
     },
     'triple_lock': {
         'script': 'triple_lock_fusion.py',
         'description': 'Multi-sensor fusion (thermal + optical + SAR)',
-        'usage': 'python triple_lock_fusion.py --sensitivity 2.5',
         'default_threshold': 2.5,
         'best_for': ['high confidence targets', 'verification'],
-        'data_source': 'All sensors combined',
-        'resolution': 'Varies by sensor',
-        'depth_limit': 'All depths',
     },
-    'download_fox_beaver': {
-        'script': 'dual_scan_downloader.py',
-        'description': 'Download Fox/Beaver Islands satellite data',
-        'usage': 'python dual_scan_downloader.py --area fox_beaver --years 2012-2025',
+    'vrt_slicer': {
+        'script': 'cesarops-slicer (Rust)',
+        'description': 'VRT Master Stack — multi-source GeoTIFF slicer with coordinate baking',
         'default_threshold': None,
-        'best_for': ['Data acquisition for Gilcher, Parnell searches'],
-        'data_source': 'USGS EarthExplorer, Sentinel Hub',
-        'resolution': 'Varies',
-        'depth_limit': 'N/A',
-        'bbox': {'lat_min': 45.60, 'lat_max': 46.10, 'lon_min': -85.60, 'lon_max': -84.40},
-    },
-    'download_full_lake': {
-        'script': 'dual_scan_downloader.py',
-        'description': 'Download full Lake Michigan satellite data (5-year low water)',
-        'usage': 'python dual_scan_downloader.py --area full_lake --years 2012,2013,2019,2020,2021,2024,2025',
-        'default_threshold': None,
-        'best_for': ['Complete basin coverage', 'Multi-year analysis'],
-        'data_source': 'Landsat-8/9, Sentinel-1/2, SWOT, ICESat-2',
-        'resolution': '10-100m/pixel',
-        'depth_limit': 'N/A',
-        'bbox': {'lat_min': 41.60, 'lat_max': 46.10, 'lon_min': -88.10, 'lon_max': -84.70},
+        'best_for': ['multi-provider alignment', 'Sentinel+Landsat fusion'],
     },
     'swot': {
-        'script': 'dual_scan_downloader.py',
-        'description': 'SWOT Ka-band displacement',
-        'usage': 'python dual_scan_downloader.py --sensor swot',
+        'script': 'swot_ssh_extractor.py',
+        'description': 'SWOT Ka-band sea surface height displacement',
         'default_threshold': 1.5,
         'best_for': ['large displacement', 'hull shapes'],
-        'data_source': 'SWOT L2 Ka-band',
-        'resolution': '100m/pixel',
-        'depth_limit': 'Surface displacement',
     },
     'atl13': {
-        'script': 'dual_scan_downloader.py',
+        'script': 'swot_ssh_extractor.py',
         'description': 'ICESat-2 ATL13 bathymetry',
-        'usage': 'python dual_scan_downloader.py --sensor atl13',
         'default_threshold': 2.0,
         'best_for': ['depth verification', 'seafloor mapping'],
-        'data_source': 'ICESat-2 ATL13',
-        'resolution': '17m along-track',
-        'depth_limit': 'Up to 100ft (clear water)',
     },
 }
 
 
-class AIDirector:
-    """AI Director - picks tools and calls them"""
+# ── Qwen LLM client ──────────────────────────────────────────────────────────
 
-    def __init__(self):
+SYSTEM_PROMPT = """\
+You are the AI Director for CESAROPS — a multi-sensor wreck detection system for the Great Lakes.
+
+The user gives you a natural language request. You must respond with ONLY a JSON object
+(no markdown, no explanation) in this exact schema:
+
+{
+  "bbox_name": "<one of the preset names below, or null for custom>",
+  "bbox": [lat_min, lon_min, lat_max, lon_max],   // use null if bbox_name is set
+  "tools": ["tool_id", ...],                        // list of tool IDs from AVAILABLE_TOOLS
+  "sensitivity": <1.0-3.0>,                         // 1.0=aggressive, 2.0=balanced, 3.0=conservative
+  "thresholds": {"thermal_zscore": 2.5, ...},       // optional per-sensor threshold overrides
+  "reasoning": "<brief explanation of your choices>"
+}
+
+Preset bounding boxes:
+"""
+
+def _build_system_prompt() -> str:
+    prompt = SYSTEM_PROMPT
+    for name, bbox in BOUNDING_BOXES.items():
+        prompt += (
+            f"  {name}: "
+            f"[{bbox['lat_min']}, {bbox['lon_min']}, "
+            f"{bbox['lat_max']}, {bbox['lon_max']}] "
+            f"→ {bbox['name']}\n"
+        )
+    prompt += "\nAvailable tools:\n"
+    for tid, tinfo in AVAILABLE_TOOLS.items():
+        prompt += (
+            f"  {tid}: {tinfo['description']} "
+            f"(best for: {', '.join(tinfo['best_for'])})\n"
+        )
+    prompt += (
+        "\nRules:\n"
+        "- If the user mentions a known wreck name, pick the matching bbox.\n"
+        "- If unclear, default to 'lake_michigan_south'.\n"
+        "- Always include at least one tool.\n"
+        "- Use sensitivity 2.0 unless the user says 'aggressive' (1.0) or 'conservative/strict' (3.0).\n"
+        "- Respond with ONLY valid JSON. No markdown. No extra text.\n"
+    )
+    return prompt
+
+
+def call_qwen(messages: List[Dict]) -> str:
+    """Send messages to Qwen via DashScope compatible API."""
+    if not QWEN_API_KEY:
+        raise RuntimeError(
+            "QWEN_API_KEY not set. Add it to .env or export QWEN_API_KEY=sk-..."
+        )
+
+    url = f"{QWEN_BASE_URL}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {QWEN_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    body = {
+        "model": QWEN_MODEL,
+        "messages": messages,
+        "temperature": 0.3,
+    }
+
+    resp = requests.post(url, headers=headers, json=body, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    return data["choices"][0]["message"]["content"]
+
+
+def parse_with_qwen(user_request: str) -> Dict:
+    """Use Qwen to parse a natural language request into tool config."""
+    system = _build_system_prompt()
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_request},
+    ]
+
+    raw = call_qwen(messages)
+
+    # Extract JSON from response (strip markdown code blocks if present)
+    raw = raw.strip()
+    if raw.startswith("```"):
+        # strip ```json or ```
+        first_nl = raw.index("\n")
+        raw = raw[first_nl + 1:]
+        if raw.endswith("```"):
+            raw = raw[:-3].strip()
+
+    parsed = json.loads(raw)
+    return parsed
+
+
+def interpret_results_with_qwen(results: List[Dict], config: Dict) -> str:
+    """Send tool execution results to Qwen for interpretation and next steps."""
+    # Build a concise summary of results
+    summary_parts = []
+    for r in results:
+        tool = r.get('tool', 'unknown')
+        status = "SUCCESS" if r.get('success') else f"FAILED: {r.get('error', r.get('stderr', '')[:200])}"
+        summary_parts.append(f"{tool}: {status}")
+
+        # Extract key lines from stdout
+        if r.get('stdout'):
+            for line in r['stdout'].split('\n'):
+                if any(kw in line.lower() for kw in ['detection', 'anomalies', 'lock', 'complete', 'total', 'fused']):
+                    summary_parts.append(f"  → {line.strip()}")
+
+    summary = "\n".join(summary_parts)
+
+    messages = [
+        {"role": "system", "content": (
+            "You are a Great Lakes wreck detection analyst AI. "
+            "Review the CESAROPS sensor probe results below and provide:\n"
+            "1. A brief executive summary of what was found\n"
+            "2. Key anomalies worth investigating\n"
+            "3. Recommended next steps (which sensors to re-run, with adjusted params)\n"
+            "4. Confidence assessment of any detected targets\n"
+            "Be concise. Use bullet points."
+        )},
+        {"role": "user", "content": (
+            f"Search config:\n"
+            f"  Area: {config.get('bbox', {}).get('name', 'Unknown')}\n"
+            f"  Tools: {config.get('tools', [])}\n"
+            f"  Sensitivity: {config.get('sensitivity', 2.0)}\n\n"
+            f"Results:\n{summary}"
+        )},
+    ]
+
+    return call_qwen(messages)
+
+
+# ── AI Director class ────────────────────────────────────────────────────────
+
+class AIDirector:
+    """AI Director — Qwen-powered tool picker, executor, and interpreter."""
+
+    def __init__(self, use_llm: bool = True):
         self.results = []
+        self.use_llm = use_llm
         self.config = {
             'bbox': None,
             'tools': [],
-            'sensitivity': 1.5,
+            'sensitivity': 2.0,
             'thresholds': {},
         }
 
     def parse_request(self, request: str) -> Dict:
-        """
-        Parse natural language request into tool configuration.
-        In production, this would call Kobold/Ollama/LLM.
-        For now, uses keyword matching.
-        """
-        request_lower = request.lower()
+        """Parse natural language request into tool config."""
+        if self.use_llm and QWEN_API_KEY:
+            try:
+                print("  🤖 Calling Qwen LLM for tool selection...")
+                parsed = parse_with_qwen(request)
+                reasoning = parsed.pop('reasoning', '')
+                if reasoning:
+                    print(f"  💡 Qwen reasoning: {reasoning}")
+                return parsed
+            except Exception as e:
+                print(f"  ⚠ Qwen LLM failed ({e}), falling back to keyword matching")
 
-        # Detect bounding box from keywords
+        # Keyword matching fallback
+        request_lower = request.lower()
         bbox_name = None
         for name, bbox in BOUNDING_BOXES.items():
-            if any(keyword in request_lower for keyword in name.lower().split('_')):
+            if any(kw in request_lower for kw in name.lower().split('_')):
                 bbox_name = name
                 break
-            if any(target.lower() in request_lower for target in bbox.get('targets', [])):
+            if any(t.lower() in request_lower for t in bbox.get('targets', [])):
                 bbox_name = name
                 break
 
-        # Detect tools from keywords
         tools = []
-        if any(word in request_lower for word in ['thermal', 'cold', 'heat', 'sink']):
-            tools.append('thermal')
-        if any(word in request_lower for word in ['optical', 'glint', 'aluminum', 'aircraft']):
-            tools.append('optical')
-        if any(word in request_lower for word in ['sar', 'vv', 'vh', 'radar']):
-            tools.append('sar')
-        if any(word in request_lower for word in ['fusion', 'triple', 'lock', 'verify']):
-            tools.append('triple_lock')
-        if any(word in request_lower for word in ['swot', 'displacement']):
-            tools.append('swot')
-        if any(word in request_lower for word in ['icesat', 'atl13', 'bathymetry']):
-            tools.append('atl13')
-
-        # Default to all sensors if none specified
+        keyword_map = {
+            ('thermal', 'cold', 'heat', 'sink'): 'thermal',
+            ('optical', 'glint', 'aluminum', 'aircraft'): 'optical',
+            ('sar', 'vv', 'vh', 'radar'): 'sar',
+            ('fusion', 'triple', 'lock', 'verify'): 'triple_lock',
+            ('swot', 'displacement', 'mass'): 'swot',
+            ('icesat', 'atl13', 'bathy', 'depth'): 'atl13',
+            ('vrt', 'stack', 'multi-source', 'multi source'): 'vrt_slicer',
+        }
+        for kws, tool in keyword_map.items():
+            if any(kw in request_lower for kw in kws):
+                tools.append(tool)
         if not tools:
             tools = ['thermal', 'optical']
 
-        # Detect sensitivity from keywords
-        sensitivity = 1.5  # Default aggressive
-        if any(word in request_lower for word in ['conservative', 'strict', 'high confidence']):
+        sensitivity = 2.0
+        if any(w in request_lower for w in ['conservative', 'strict', 'high confidence']):
             sensitivity = 3.0
-        elif any(word in request_lower for word in ['aggressive', 'sensitive', 'all']):
+        elif any(w in request_lower for w in ['aggressive', 'sensitive', 'all', 'wide net']):
             sensitivity = 1.0
 
-        return {
-            'bbox_name': bbox_name,
-            'tools': tools,
-            'sensitivity': sensitivity,
-        }
+        return {'bbox_name': bbox_name, 'tools': tools, 'sensitivity': sensitivity}
 
-    def set_bounding_box(self, bbox_name: str = None, lat_min=None, lat_max=None, lon_min=None, lon_max=None):
-        """Set search area bounding box"""
+    # ── Config setters ───────────────────────────────────────────────────
+
+    def set_bounding_box(self, bbox_name: str = None,
+                         lat_min=None, lat_max=None, lon_min=None, lon_max=None):
         if bbox_name and bbox_name in BOUNDING_BOXES:
             self.config['bbox'] = BOUNDING_BOXES[bbox_name]
-            print(f"✓ Bounding box: {self.config['bbox']['name']}")
         elif all(v is not None for v in [lat_min, lat_max, lon_min, lon_max]):
             self.config['bbox'] = {
                 'name': 'Custom',
-                'lat_min': lat_min,
-                'lat_max': lat_max,
-                'lon_min': lon_min,
-                'lon_max': lon_max,
+                'lat_min': lat_min, 'lat_max': lat_max,
+                'lon_min': lon_min, 'lon_max': lon_max,
             }
-            print(f"✓ Custom bounding box set")
         else:
-            # Default to Lake Michigan South
             self.config['bbox'] = BOUNDING_BOXES['lake_michigan_south']
-            print(f"✓ Default bounding box: {self.config['bbox']['name']}")
+        print(f"✓ Area: {self.config['bbox']['name']}")
 
     def set_tools(self, tools: List[str]):
-        """Select which tools to run"""
-        valid_tools = [t for t in tools if t in AVAILABLE_TOOLS]
-        self.config['tools'] = valid_tools
-        print(f"✓ Tools selected: {', '.join(valid_tools)}")
-        
-        # Auto-set bounding box if tool has one
-        for tool in valid_tools:
-            if AVAILABLE_TOOLS[tool].get('bbox'):
-                bbox = AVAILABLE_TOOLS[tool]['bbox']
-                self.config['bbox'] = {
-                    'name': tool,
-                    **bbox
-                }
-                print(f"✓ Bounding box: {bbox['lat_min']:.2f}°N to {bbox['lat_max']:.2f}°N")
+        valid = [t for t in tools if t in AVAILABLE_TOOLS]
+        self.config['tools'] = valid
+        print(f"✓ Tools: {', '.join(valid)}")
 
     def set_parameters(self, sensitivity: float = None, thresholds: Dict = None):
-        """Adjust tool parameters"""
         if sensitivity is not None:
             self.config['sensitivity'] = sensitivity
         if thresholds:
             self.config['thresholds'] = thresholds
-
         print(f"✓ Sensitivity: {self.config['sensitivity']}")
-        if self.config['thresholds']:
-            print(f"✓ Thresholds: {self.config['thresholds']}")
+
+    # ── Execution ──────────────────────────────────────────────────────────
 
     def run_tool(self, tool_name: str) -> Dict:
-        """Execute a single tool with current config"""
-        if tool_name not in AVAILABLE_TOOLS:
-            return {'error': f'Unknown tool: {tool_name}'}
-
         tool = AVAILABLE_TOOLS[tool_name]
         script_path = Path(__file__).parent / tool['script']
 
         if not script_path.exists():
-            return {'error': f'Script not found: {script_path}'}
+            return {'tool': tool_name, 'success': False,
+                    'error': f'Script not found: {script_path}'}
 
-        print(f"\n{'='*80}")
-        print(f"RUNNING: {tool['description']}")
-        print(f"{'='*80}")
-
-        # Build command
         cmd = [sys.executable, str(script_path)]
 
-        # Add parameters
-        if '--sensitivity' in tool.get('description', ''):
-            cmd.extend(['--sensitivity', str(self.config['sensitivity'])])
-
-        # Add bounding box if tool supports it
-        if self.config['bbox']:
-            bbox = self.config['bbox']
-            # Some tools may need bbox as args
-            # cmd.extend(['--bbox', f"{bbox['lat_min']},{bbox['lon_min']},{bbox['lat_max']},{bbox['lon_max']}"])
-
-        print(f"Command: {' '.join(cmd)}")
-
-        # Execute
         try:
             result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=600,  # 10 minute timeout
+                cmd, capture_output=True, text=True, timeout=600,
             )
-
             return {
                 'tool': tool_name,
                 'success': result.returncode == 0,
@@ -316,162 +385,173 @@ class AIDirector:
                 'returncode': result.returncode,
             }
         except subprocess.TimeoutExpired:
-            return {
-                'tool': tool_name,
-                'success': False,
-                'error': 'Tool execution timed out (10 min)',
-            }
+            return {'tool': tool_name, 'success': False,
+                    'error': 'Timed out (10 min)'}
         except Exception as e:
-            return {
-                'tool': tool_name,
-                'success': False,
-                'error': str(e),
-            }
+            return {'tool': tool_name, 'success': False, 'error': str(e)}
 
     def execute(self) -> List[Dict]:
-        """Run all selected tools"""
-        print(f"\n{'='*80}")
-        print(f"AI DIRECTOR - EXECUTING {len(self.config['tools'])} TOOLS")
-        print(f"{'='*80}")
-        print(f"Bounding box: {self.config['bbox']['name']}")
-        print(f"Sensitivity: {self.config['sensitivity']}")
-        print(f"Tools: {', '.join(self.config['tools'])}")
+        print(f"\n{'='*70}")
+        print(f"AI DIRECTOR — {len(self.config['tools'])} tools")
+        print(f"  Area: {self.config['bbox']['name']}")
+        print(f"  Sensitivity: {self.config['sensitivity']}")
+        print(f"  Tools: {', '.join(self.config['tools'])}")
+        print(f"{'='*70}")
 
         results = []
-
         for tool_name in self.config['tools']:
-            print(f"\n[{len(results)+1}/{len(self.config['tools'])}] Running {tool_name}...")
+            print(f"\n[{len(results)+1}/{len(self.config['tools'])}] {tool_name}...")
             result = self.run_tool(tool_name)
             results.append(result)
-
-            if result.get('success'):
-                print(f"✓ {tool_name} completed successfully")
-            else:
-                print(f"✗ {tool_name} failed: {result.get('error', result.get('stderr', 'Unknown error'))}")
+            status = "✓" if result.get('success') else "✗"
+            print(f"  {status} {tool_name}")
 
         self.results = results
         return results
 
     def summarize(self) -> str:
-        """Generate summary of all tool results"""
-        summary = []
-        summary.append("\n" + "="*80)
-        summary.append("AI DIRECTOR - EXECUTION SUMMARY")
-        summary.append("="*80)
+        lines = [f"\n{'='*70}", "EXECUTION SUMMARY", f"{'='*70}"]
+        for r in self.results:
+            tool = r.get('tool', '?')
+            status = "✓ SUCCESS" if r.get('success') else f"✗ FAILED: {r.get('error', '')}"
+            lines.append(f"\n  {tool}: {status}")
+            if r.get('stdout'):
+                for line in r['stdout'].split('\n'):
+                    if any(kw in line.lower() for kw in ['detection', 'anomalies', 'lock', 'complete', 'total', 'fused', 'triple']):
+                        lines.append(f"    {line.strip()}")
+        return '\n'.join(lines)
 
-        for result in self.results:
-            tool = result.get('tool', 'Unknown')
-            status = "✓ SUCCESS" if result.get('success') else "✗ FAILED"
-            summary.append(f"\n{tool}: {status}")
+    # ── Interpretation ─────────────────────────────────────────────────────
 
-            if result.get('stdout'):
-                # Extract key info from output
-                for line in result['stdout'].split('\n'):
-                    if 'detections' in line.lower() or 'anomalies' in line.lower() or 'complete' in line.lower():
-                        summary.append(f"  {line.strip()}")
+    def interpret(self) -> str:
+        """Send results to Qwen for interpretation."""
+        if not QWEN_API_KEY:
+            print("  ⚠ QWEN_API_KEY not set, skipping interpretation")
+            return self.summarize()
 
-            if result.get('error'):
-                summary.append(f"  Error: {result['error']}")
+        try:
+            print("\n  🤖 Sending results to Qwen for interpretation...")
+            briefing = interpret_results_with_qwen(self.results, self.config)
+            return briefing
+        except Exception as e:
+            print(f"  ⚠ Interpretation failed: {e}")
+            return self.summarize()
 
-        return '\n'.join(summary)
 
+# ── CLI ──────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description='AI Director - Tool Picker & Executor')
-
-    # Natural language request
-    parser.add_argument('--request', '-r', type=str, help='Natural language request (e.g., "Search for Gilcher near Fox Islands")')
-
-    # Manual configuration
-    parser.add_argument('--bbox', type=str, help='Bounding box: lat_min,lat_max,lon_min,lon_max or preset name')
-    parser.add_argument('--tools', type=str, help='Comma-separated list of tools: thermal,optical,sar')
-    parser.add_argument('--sensitivity', type=float, default=1.5, help='Sensitivity (1.0=aggressive, 3.0=conservative)')
-
-    # List available tools
-    parser.add_argument('--list-tools', '-l', action='store_true', help='List all available tools with metadata')
-
-    # Execute
-    parser.add_argument('--execute', '-x', action='store_true', help='Execute tools immediately')
-    parser.add_argument('--output', '-o', type=str, help='Save results to JSON file')
-
+    parser = argparse.ArgumentParser(description='AI Director — Qwen-Powered CESAROPS Orchestrator')
+    parser.add_argument('--request', '-r', type=str, help='Natural language request')
+    parser.add_argument('--bbox', type=str, help='Bounding box: lat_min,lon_min,lat_max,lon_max or preset name')
+    parser.add_argument('--tools', type=str, help='Comma-separated tool list')
+    parser.add_argument('--sensitivity', type=float, default=2.0, help='1.0=aggressive, 3.0=conservative')
+    parser.add_argument('--list-tools', '-l', action='store_true')
+    parser.add_argument('--execute', '-x', action='store_true')
+    parser.add_argument('--interpret', '-i', type=str, nargs='*', help='Interpret existing result JSON files')
+    parser.add_argument('--no-llm', action='store_true', help='Disable Qwen, use keyword matching')
+    parser.add_argument('--output', '-o', type=str, help='Save results to JSON')
     args = parser.parse_args()
 
-    # List tools if requested
-    if args.list_tools:
-        print("\n" + "="*120)
-        print("AVAILABLE TOOLS - CESAROPS TOOLKIT")
-        print("="*120)
-        
-        for tool_id, tool in AVAILABLE_TOOLS.items():
-            print(f"\n {tool_id.upper()}")
-            print(f"   Description: {tool['description']}")
-            print(f"   Usage: {tool['usage']}")
-            if tool.get('data_source'):
-                print(f"   Data Source: {tool['data_source']}")
-            if tool.get('resolution'):
-                print(f"   Resolution: {tool['resolution']}")
-            if tool.get('best_for'):
-                print(f"   Best For: {', '.join(tool['best_for'])}")
-            if tool.get('bbox'):
-                bbox = tool['bbox']
-                print(f"   Coverage: {bbox['lat_min']:.2f}°N to {bbox['lat_max']:.2f}°N, {bbox['lon_min']:.2f}°W to {bbox['lon_max']:.2f}°W")
-        
-        print("\n" + "="*120)
-        print("EXAMPLE COMMANDS:")
-        print("="*120)
-        print('  python ai_director.py --request "Search for Gilcher near Fox Islands" --execute')
-        print('  python ai_director.py --tools download_fox_beaver --execute')
-        print('  python ai_director.py --bbox 45.8,-84.6,46.0,-84.4 --tools thermal,optical --sensitivity 1.5')
-        print('  python ai_director.py --list-tools')
-        print("="*120)
+    if not QWEN_API_KEY:
+        print("⚠ QWEN_API_KEY not set — LLM features disabled")
+        print("  Set it in .env or: export QWEN_API_KEY=sk-...")
+
+    # ── Interpret mode ─────────────────────────────────────────────────────
+    if args.interpret is not None:
+        results_data = []
+        for fp in args.interpret:
+            p = Path(fp)
+            if p.exists():
+                results_data.append(json.loads(p.read_text()))
+            else:
+                print(f"  ⚠ Not found: {fp}")
+
+        if results_data and QWEN_API_KEY:
+            messages = [
+                {"role": "system", "content": (
+                    "You are a Great Lakes wreck detection analyst AI. "
+                    "Review these CESAROPS sensor results and provide:\n"
+                    "1. Executive summary\n"
+                    "2. Key anomalies to investigate\n"
+                    "3. Recommended next steps\n"
+                    "Be concise, use bullet points."
+                )},
+                {"role": "user", "content": json.dumps(results_data, indent=2)[:4000]},
+            ]
+            print(call_qwen(messages))
+        elif results_data:
+            print("  ⚠ QWEN_API_KEY not set, cannot interpret")
         return
 
-    # Initialize director
-    director = AIDirector()
+    # ── List tools ─────────────────────────────────────────────────────────
+    if args.list_tools:
+        print(f"\n{'='*100}")
+        print("AVAILABLE TOOLS")
+        print(f"{'='*100}")
+        for tid, t in AVAILABLE_TOOLS.items():
+            print(f"\n  {tid}")
+            print(f"    {t['description']}")
+            print(f"    Best for: {', '.join(t['best_for'])}")
+        print(f"\n{'='*100}")
+        return
 
-    # Parse request if provided
+    # ── Run ────────────────────────────────────────────────────────────────
+    director = AIDirector(use_llm=not args.no_llm)
+
     if args.request:
-        print(f"Parsing request: {args.request}")
+        print(f"\nRequest: {args.request}")
         parsed = director.parse_request(args.request)
 
-        if parsed['bbox_name']:
+        if parsed.get('bbox_name'):
             director.set_bounding_box(parsed['bbox_name'])
-        director.set_tools(parsed['tools'])
-        director.set_parameters(sensitivity=parsed['sensitivity'])
+        elif parsed.get('bbox'):
+            b = parsed['bbox']
+            director.set_bounding_box(lat_min=b[0], lon_min=b[1], lat_max=b[2], lon_max=b[3])
 
-    # Override with manual config
-    if args.bbox:
-        if args.bbox in BOUNDING_BOXES:
-            director.set_bounding_box(args.bbox)
-        else:
-            try:
-                lat_min, lon_min, lat_max, lon_max = map(float, args.bbox.split(','))
-                director.set_bounding_box(lat_min=lat_min, lat_max=lat_max, lon_min=lon_min, lon_max=lon_max)
-            except:
-                print(f"Invalid bbox format: {args.bbox}")
-
-    if args.tools:
-        director.set_tools(args.tools.split(','))
-
-    if args.sensitivity:
+        director.set_tools(parsed.get('tools', []))
+        director.set_parameters(
+            sensitivity=parsed.get('sensitivity', args.sensitivity),
+            thresholds=parsed.get('thresholds'),
+        )
+    else:
+        # Manual config
+        if args.bbox:
+            if args.bbox in BOUNDING_BOXES:
+                director.set_bounding_box(args.bbox)
+            else:
+                try:
+                    parts = [float(x) for x in args.bbox.split(',')]
+                    director.set_bounding_box(lat_min=parts[0], lon_min=parts[1],
+                                              lat_max=parts[2], lon_max=parts[3])
+                except Exception:
+                    print(f"Invalid bbox: {args.bbox}")
+        if args.tools:
+            director.set_tools(args.tools.split(','))
         director.set_parameters(sensitivity=args.sensitivity)
 
-    # Execute if requested
-    if args.execute or not args.request:
+    if args.execute or args.request:
         results = director.execute()
-        print(director.summarize())
 
-        # Save results
+        # Interpretation
+        print(f"\n{'='*70}")
+        print("QWEN INTERPRETATION")
+        print(f"{'='*70}")
+        briefing = director.interpret()
+        print(briefing)
+
+        # Save
         if args.output:
-            output_path = Path(args.output)
-            with open(output_path, 'w') as f:
-                json.dump({
-                    'timestamp': datetime.now().isoformat(),
-                    'config': director.config,
-                    'results': results,
-                    'summary': director.summarize(),
-                }, f, indent=2)
-            print(f"\n✓ Results saved to: {output_path}")
+            out = Path(args.output)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps({
+                'timestamp': datetime.now().isoformat(),
+                'config': director.config,
+                'results': results,
+                'summary': director.summarize(),
+                'interpretation': briefing,
+            }, indent=2))
+            print(f"\n✓ Saved: {out}")
 
 
 if __name__ == '__main__':

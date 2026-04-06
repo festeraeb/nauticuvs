@@ -3,6 +3,10 @@
 CESAROPS FULL SENSOR PROBE ORCHESTRATOR
 Designed for Agent Execution & Parameter Tuning
 Fires multiple sensors, fuses results, outputs GeoJSON map.
+
+Qwen LLM integration:
+    --llm-plan "<request>"     Ask Qwen to design the sensor plan from natural language
+    --llm-interpret             Send results to Qwen for interpretation after run
 """
 
 import argparse
@@ -10,6 +14,7 @@ import json
 import subprocess
 import sys
 import os
+import requests
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -35,12 +40,94 @@ AGENT_CONFIG = {
         "swot_ssh_m": 0.015
     },
     "execution": {
-        "cpu_fallback": True,  # If GPU cl.exe fails, switch to CPU
-        "timeout_min": 30,     # Max minutes per sensor run
-        "fail_fast": False     # True = stop on first error. False = continue.
+        "cpu_fallback": True,
+        "timeout_min": 30,
+        "fail_fast": False
     }
 }
 # ============================================================================
+
+# ── Qwen LLM helpers ─────────────────────────────────────────────────────────
+
+def _load_env(path: Path) -> dict:
+    env = {}
+    if path.exists():
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                k, _, v = line.partition('=')
+                env[k.strip()] = v.strip()
+    return env
+
+_dotenv = _load_env(Path(__file__).parent / ".env")
+QWEN_API_KEY = os.environ.get("QWEN_API_KEY", _dotenv.get("QWEN_API_KEY", ""))
+QWEN_MODEL = os.environ.get("QWEN_MODEL", _dotenv.get("QWEN_MODEL", "qwen-plus"))
+QWEN_BASE_URL = os.environ.get("QWEN_BASE_URL", _dotenv.get("QWEN_BASE_URL",
+    "https://dashscope.aliyuncs.com/compatible-mode/v1"))
+
+
+def call_qwen(messages: list) -> str:
+    """Send messages to Qwen via DashScope compatible API."""
+    if not QWEN_API_KEY:
+        raise RuntimeError("QWEN_API_KEY not set")
+    url = f"{QWEN_BASE_URL}/chat/completions"
+    resp = requests.post(url, headers={
+        "Authorization": f"Bearer {QWEN_API_KEY}",
+        "Content-Type": "application/json",
+    }, json={"model": QWEN_MODEL, "messages": messages, "temperature": 0.3}, timeout=30)
+    resp.raise_for_status()
+    return resp.json()["choices"][0]["message"]["content"]
+
+
+def llm_generate_sensor_plan(user_request: str) -> dict:
+    """Ask Qwen to design a sensor plan from a natural language request."""
+    areas_json = json.dumps({k: v["label"] for k, v in AGENT_CONFIG["areas"].items()})
+    system_msg = (
+        f"You are the CESAROPS sensor orchestrator. "
+        f"Given a user request, choose the right sensors, area, and thresholds.\n\n"
+        f"Available areas: {areas_json}\n"
+        f"Available sensors: thermal, nir_swir, sar, swot\n\n"
+        f"Respond with ONLY valid JSON matching this schema:\n"
+        '{{"area": "<area_key>", "sensors": ["sensor", ...], "thresholds": {{"thermal_zscore": N, ...}}, "reasoning": "..."}}'
+    )
+    raw = call_qwen([
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": user_request},
+    ])
+    # Strip markdown code blocks
+    raw = raw.strip()
+    if raw.startswith("```"):
+        nl = raw.index("\n")
+        raw = raw[nl + 1:]
+        if raw.endswith("```"):
+            raw = raw[:-3].strip()
+    return json.loads(raw)
+
+
+def llm_interpret_results(results: list, config: dict) -> str:
+    """Send results to Qwen for interpretation and next-step recommendations."""
+    summary = []
+    for r in results:
+        status = "OK" if r["status"] == "success" else r.get("status", "unknown")
+        summary.append(f"  {r['sensor']}: {status}")
+        if r.get("error"):
+            summary.append(f"    Error: {r['error'][:200]}")
+
+    return call_qwen([
+        {"role": "system", "content": (
+            "You are a Great Lakes wreck detection analyst. "
+            "Review these CESAROPS sensor probe results and provide:\n"
+            "1. Executive summary\n"
+            "2. Key anomalies to investigate\n"
+            "3. Recommended next steps (which sensors to re-run, adjusted thresholds)\n"
+            "Be concise, use bullet points."
+        )},
+        {"role": "user", "content": (
+            f"Area: {config.get('area', 'unknown')}\n"
+            f"Thresholds: {json.dumps(config.get('thresholds', {}))}\n\n"
+            f"Results:\n" + "\n".join(summary)
+        )},
+    ])
 
 def log(msg, level="INFO"):
     ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
@@ -142,17 +229,37 @@ def main():
     parser.add_argument("--area", choices=AGENT_CONFIG["areas"].keys(), default="lake_michigan_south")
     parser.add_argument("--sensors", nargs="+", default=None, help="Override sensor list")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--llm-plan", type=str, help='Ask Qwen to design sensor plan from natural language')
+    parser.add_argument("--llm-interpret", action="store_true", help="Send results to Qwen after run")
     args = parser.parse_args()
 
-    area_name = args.area
+    # ── LLM plan mode ──────────────────────────────────────────────────────
+    if args.llm_plan:
+        if not QWEN_API_KEY:
+            log("QWEN_API_KEY not set — cannot use --llm-plan", "ERROR")
+            return
+        log(f"🤖 Asking Qwen to design sensor plan: {args.llm_plan}")
+        plan = llm_generate_sensor_plan(args.llm_plan)
+        log(f"💡 Qwen reasoning: {plan.get('reasoning', '')}")
+
+        area_name = plan.get("area", args.area)
+        sensors = plan.get("sensors", AGENT_CONFIG["sensors"])
+        if plan.get("thresholds"):
+            AGENT_CONFIG["thresholds"].update(plan["thresholds"])
+        log(f"   Area: {area_name}")
+        log(f"   Sensors: {sensors}")
+        log(f"   Thresholds: {AGENT_CONFIG['thresholds']}")
+    else:
+        area_name = args.area
+        sensors = args.sensors or AGENT_CONFIG["sensors"]
+
     area_cfg = AGENT_CONFIG["areas"][area_name]
-    sensors = args.sensors or AGENT_CONFIG["sensors"]
-    
-    log("="*60)
+
+    log("=" * 60)
     log(f"🛰️  STARTING PROBE: {area_cfg['label']}")
     log(f"📡 SENSORS: {', '.join(sensors)}")
     log(f"🤖 AGENT CONFIG LOADED")
-    log("="*60)
+    log("=" * 60)
 
     if args.dry_run:
         log("🛑 DRY RUN MODE. Exiting.")
@@ -168,14 +275,32 @@ def main():
 
     out_file = f"outputs/probes/probe_{area_name}_{datetime.now().strftime('%Y%m%d_%H%M')}.geojson"
     fuse_to_geojson(results, out_file)
-    
+
+    # ── LLM interpretation ─────────────────────────────────────────────────
+    if args.llm_interpret:
+        if QWEN_API_KEY:
+            log("🤖 Sending results to Qwen for interpretation...")
+            try:
+                briefing = llm_interpret_results(results, {
+                    "area": area_name,
+                    "thresholds": AGENT_CONFIG["thresholds"],
+                })
+                log("=" * 60)
+                log("QWEN BRIEFING")
+                log("=" * 60)
+                print(briefing)
+            except Exception as e:
+                log(f"Interpretation failed: {e}", "ERROR")
+        else:
+            log("QWEN_API_KEY not set — skipping interpretation", "WARN")
+
     # Print Agent Summary
     successes = [r for r in results if r["status"] == "success"]
-    log("="*60)
+    log("=" * 60)
     log(f"📊 PROBE COMPLETE: {len(successes)}/{len(sensors)} sensors succeeded")
     log(f"📁 Output: {out_file}")
     log("🤖 Agent can now review logs, adjust thresholds, and re-run.")
-    log("="*60)
+    log("=" * 60)
 
 if __name__ == "__main__":
     main()
