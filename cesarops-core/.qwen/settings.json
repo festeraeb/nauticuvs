@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ping *)",
+      "Bash(ssh *)",
+      "Bash(arp *)",
+      "Bash(ipconfig)",
+      "Bash(wmic *)",
+      "Bash(powershell *)",
+      "Bash(do *)",
+      "Bash(ssh-keygen *)",
+      "Bash(nslookup *)"
+    ]
+  },
+  "$version": 3
+}

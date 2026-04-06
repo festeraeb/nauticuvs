@@ -1,0 +1,55 @@
+{
+  "mission_id": "LAKE_MI_MONSTER_001",
+  "target_ref": "Andoste_Vicinity",
+  "search_params": {
+    "bounds": [42.80, -86.30, 43.10, -86.60],
+    "depth_target_feet": 450,
+    "expected_length_meters": 100,
+    "tile_size": 1024
+  },
+  "modules": [
+    {
+      "id": "SiltMasker_B4_B3",
+      "mode": "TRANSPARENCY_HOLE",
+      "delegate": "CORAL_TPU_INT8",
+      "params": {
+        "silt_coeff": 0.85,
+        "mussel_halo_detection": true
+      },
+      "roi": {
+        "lat": 42.95,
+        "lon": -86.45,
+        "radius_km": 5.0
+      },
+      "bands": ["B3", "B4"],
+      "goal": "Identify the 'Clear Spot' caused by mussel filtration over the 330ft hull."
+    },
+    {
+      "id": "HCTractor_B11_B2",
+      "mode": "ANTI_WAKE",
+      "delegate": "CORAL_TPU_INT8",
+      "params": {
+        "bubble_threshold": 180,
+        "hc_sensitivity": "high"
+      },
+      "bands": ["B2", "B11"],
+      "goal": "Retract prop-wash noise to see if the 'Monster' is breathing heavy fuel oil."
+    },
+    {
+      "id": "Nauticus_Curvelet",
+      "mode": "THERMAL_SPINE",
+      "delegate": "NVIDIA_GPU",
+      "bands": ["B10"],
+      "params": {
+        "edge_sensitivity": 0.92,
+        "spine_lock": "linear_rail"
+      },
+      "goal": "Differentiate the 14,000-ton steel mass from a flat barge using thermal ridges."
+    }
+  ],
+  "output_strategy": {
+    "sync_node": "PI_JANITOR_SYNCTHING",
+    "storage": "SANDISK_G_ARMOR_1TB",
+    "frontend": "TAURI_P51_LAPTOP"
+  }
+}

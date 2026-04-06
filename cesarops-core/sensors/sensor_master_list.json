@@ -1,0 +1,46 @@
+{
+  "sensor_master_list": {
+    "optical_high_res": {
+      "sentinel_2_msi": {
+        "source": "Copernicus Data Space / AWS S3",
+        "resolution": 10.0,
+        "best_use": "Surface Hydrocarbons (B2, B11, B12)",
+        "hint": "Pull 'Level-2A' for Bottom-of-Atmosphere (BOA) reflectance; ignores haze.",
+        "bands": {"blue": "B2", "green": "B3", "red": "B4", "nir": "B8", "swir1": "B11", "swir2": "B12"}
+      },
+      "landsat_8_9_oli": {
+        "source": "USGS EarthExplorer / USGS S3",
+        "resolution": 30.0,
+        "best_use": "Thermal Mass & Deep Silt (B10, B11)",
+        "hint": "Use B10 Thermal for 'Spine Locking' steel hulls. Night passes are best for contrast.",
+        "bands": {"blue": "B2", "green": "B3", "thermal": "B10"}
+      }
+    },
+    "radar_sar": {
+      "sentinel_1_c_band": {
+        "source": "ASF Alaska Satellite Facility",
+        "resolution": 5.0,
+        "best_use": "Surface Tension / Glint / Wake persistence",
+        "hint": "Use 'VV' polarization for oil sheen detection in choppy water.",
+        "mode": "IW (Interferometric Wide)"
+      }
+    },
+    "laser_bathy": {
+      "icesat_2_atl13": {
+        "source": "NSIDC (National Snow and Ice Data Center)",
+        "resolution": "0.7m (Along-track)",
+        "best_use": "Inland Water Bathymetry / Clear Spot validation",
+        "hint": "Look for 'strong beam' hits that penetrate deeper than the surrounding lake floor.",
+        "data_product": "ATL13 (Inland Water Height)"
+      }
+    },
+    "gravity_topo": {
+      "swot": {
+        "source": "NASA PO.DAAC",
+        "resolution": "Variable (High-res KaRIn)",
+        "best_use": "Micro-bulges / Mass displacement",
+        "hint": "Best for detecting the 'dome' effect over massive 14,000-ton wrecks."
+      }
+    }
+  }
+}

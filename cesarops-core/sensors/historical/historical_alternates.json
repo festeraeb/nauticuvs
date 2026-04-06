@@ -1,0 +1,40 @@
+{
+  "historical_alternates": {
+    "landsat_7_etm_plus": {
+      "active_years": "1999-Present",
+      "resolution": 30.0,
+      "best_use": "Long-term Baseline / Low Water Scans",
+      "warning": "SLC-Off Error: Data after May 2003 has diagonal black stripes. Your 'cesarops-slicer' dedup/mmap must skip 0-value pixels.",
+      "bands": {"blue": "B1", "green": "B2", "red": "B3", "nir": "B4", "swir": "B5", "thermal": "B6"},
+      "source": "USGS EarthExplorer (Collection 2 Level-1)"
+    },
+    "terra_aqua_modis": {
+      "active_years": "1999/2002-Present",
+      "resolution": 250.0,
+      "best_use": "Massive Hydrocarbon Plumes / Thermal Trends",
+      "hint": "Resolution is coarse (250m-1km), but revisit is daily. Use this to find the 'start date' of a leak before using Landsat for the 'pin'.",
+      "source": "NASA LAADS DAAC"
+    },
+    "eo1_ali": {
+      "active_years": "2000-2017",
+      "resolution": 30.0,
+      "best_use": "Experimental High-Clarity / Low Water",
+      "hint": "Advanced Land Imager (ALI) was the prototype for Landsat 8. Cleaner signal-to-noise than Landsat 7.",
+      "source": "USGS EarthExplorer (EO-1 Archive)"
+    },
+    "envisat_meris": {
+      "active_years": "2002-2012",
+      "resolution": 300.0,
+      "best_use": "Historical Algae vs. Silt separation",
+      "hint": "The predecessor to Sentinel-3. Great for 'retracting' 2012 silt loads.",
+      "source": "ESA Heritage Archive"
+    },
+    "spot_4_5": {
+      "active_years": "1998-2013",
+      "resolution": 10.0,
+      "best_use": "High-Res Historical Mapping",
+      "hint": "Commercial, but often released in open archives for 'low water' research.",
+      "source": "CNES / Airbus Intelligence"
+    }
+  }
+}
