@@ -11,6 +11,7 @@ import RestorationPanel from "./components/RestorationPanel";
 import MapPanel from "./components/MapPanel";
 import PDFBreakerPanel from "./components/PDFBreakerPanel";
 import ExportPanel from "./components/ExportPanel";
+import AgentPanel from "./components/AgentPanel";
 import LoranPanel from "./components/LoranPanel";
 import ExtendedSensorsPanel from "./components/ExtendedSensorsPanel";
 import HarvesterPanel from "./components/HarvesterPanel";
@@ -66,7 +67,7 @@ export default function App() {
     setPanel("list");
   };
 
-  type ActivePanel = "stats" | "list" | "detail" | "harvest" | "map" | "scan" | "mag" | "erie" | "restore" | "pdf" | "export" | "loran" | "sensors";
+  type ActivePanel = "stats" | "list" | "detail" | "harvest" | "map" | "scan" | "mag" | "erie" | "restore" | "pdf" | "export" | "loran" | "sensors" | "agent";
 
   const handleSetPanel = (panel: ActivePanel) => {
     setPanel(panel);
@@ -140,6 +141,11 @@ export default function App() {
         </button>
         <button onClick={() => goListWithFilter(false, "moderate")}>
           〰 Moderate Magnetic
+        </button>
+
+        <div className="section-label">Agent</div>
+        <button className={panel === "agent" ? "active" : ""} onClick={() => setPanel("agent")}>
+          🤖 AI Director
         </button>
 
         <div className="section-label">Pipelines</div>
@@ -217,6 +223,9 @@ export default function App() {
         </div>
         <div style={{ display: panel === "harvest" ? "block" : "none", height: '100%' }}>
           <HarvesterPanel />
+        </div>
+        <div style={{ display: panel === "agent" ? "block" : "none", height: '100%' }}>
+          <AgentPanel />
         </div>
         <div style={{ display: panel === "detail" ? "block" : "none", height: '100%' }}>
           {selectedWreck && <WreckDetail wreck={selectedWreck} onBack={() => setPanel("list")} />}

@@ -7,9 +7,7 @@
 //!
 //! The backend is a thin wrapper: spawns Python → captures stdout → sends to React frontend.
 
-use std::path::PathBuf;
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Emitter;
 use serde::{Deserialize, Serialize};
 
@@ -51,9 +49,8 @@ async fn run_task(
     cwd: Option<String>,
 ) -> Result<TaskOutput, String> {
     let start = std::time::Instant::now();
-    let cancelled = std::sync::Arc::new(AtomicBool::new(false));
 
-    let mode = AppMode::Thin; // Default: thin mode
+    let mode = AppMode::Thin;
     let python = mode.python();
 
     let mut cmd = Command::new(python);
