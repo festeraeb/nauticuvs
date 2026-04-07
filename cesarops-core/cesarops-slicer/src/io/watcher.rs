@@ -60,8 +60,8 @@ impl PreprocessWatcher {
             match result {
                 Ok(event) => {
                     if let EventKind::Create(_) = event.kind {
-                        for path in event.paths {
-                            self.on_new_file(&path);
+                        for path in event.paths.iter() {
+                            self.on_new_file(path);
                         }
                     }
                 }

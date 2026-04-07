@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use tracing::{debug, info};
 
 use crate::io::geotiff::GeoTransform;
-use crate::io::vrt::{ResampleMethod, VrtDataset};
+use crate::io::vrt::{ResampleMethod, VrtDataset, VrtNormalizer};
 use crate::spec::delegate::DelegateTarget;
 use crate::spec::mission::MissionSpec;
 use crate::tiles::anchor::{AnchorCalculator, TileAnchor};

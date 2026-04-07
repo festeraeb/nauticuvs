@@ -45,6 +45,7 @@ pub struct WarpResult {
 }
 
 /// GDAL warp configuration — tunable by Qwen.
+#[derive(Clone)]
 pub struct WarpConfig {
     /// Working memory in MB (VRAM budget). Default: 4000 for P1000.
     /// If OOM, Qwen can lower this to 2000.

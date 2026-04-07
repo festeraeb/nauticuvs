@@ -402,9 +402,9 @@ impl VrtDataset {
     /// Read a window of pixels from the VRT stack.
     ///
     /// For each virtual band, reads from the appropriate source file
-    /// and resamples if needed. Preserves ALL bands from each source.
+    /// and resamples if needed.
     ///
-    /// Returns `[total_bands, row, col]` shaped array.
+    /// Returns `[band, row, col]` shaped array.
     pub fn read_window(
         &self,
         x_off: u32,
@@ -412,7 +412,7 @@ impl VrtDataset {
         x_size: u32,
         y_size: u32,
     ) -> Result<Vec<Vec<Vec<u8>>>> {
-        let mut all_bands = Vec::new();
+        let mut all_bands = Vec::with_capacity(self.bands.len());
 
         for band in &self.bands {
             // Open the source
@@ -426,32 +426,28 @@ impl VrtDataset {
             let src_w = ((x_size as f64) / scale).ceil() as u32;
             let src_h = ((y_size as f64) / scale).ceil() as u32;
 
-            // Read from source (may have multiple bands: [src_band, row, col])
+            // Read from source
             let window = source.read_window(src_x, src_y, src_w, src_h)
                 .map_err(|e| VrtError::SourceOpen(e.to_string()))?;
 
-            // Resample if needed — preserves ALL bands from the source
-            let band_data = if scale > 1.5 {
+            // Resample if needed
+            let band_data: Vec<Vec<Vec<u8>>> = if scale > 1.5 {
                 // Source is lower res — bilinear upscale
                 Self::bilinear_upscale(&window, x_size as usize, y_size as usize)
             } else if scale < 0.7 {
                 // Source is higher res — downscale with averaging
                 Self::bilinear_downscale(&window, x_size as usize, y_size as usize)
             } else {
-                // Close enough — extract directly, all bands
-                let src_bands = window.shape()[0];
-                let rows = window.shape()[1];
-                let cols = window.shape()[2];
-                (0..src_bands)
+                // Close enough — just crop to target size
+                (0..window.shape()[0])
                     .map(|b| {
-                        (0..rows)
+                        (0..window.shape()[1])
                             .map(|r| window.slice(ndarray::s![b, r, ..]).to_vec())
                             .collect()
                     })
                     .collect()
             };
 
-            // Push ALL bands from this source into the stack
             all_bands.extend(band_data);
         }
 
