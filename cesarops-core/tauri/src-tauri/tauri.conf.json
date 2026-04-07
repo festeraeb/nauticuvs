@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Wreckhunter 2000",
-  "version": "2.0.0",
-  "identifier": "com.wreckhunter.wrecks",
+  "productName": "CESAROPS",
+  "version": "0.1.0",
+  "identifier": "com.cesarops.wreckhunter",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",
@@ -12,9 +12,9 @@
   "app": {
     "windows": [
       {
-        "title": "Wreckhunter 2000",
-        "width": 1280,
-        "height": 860,
+        "title": "CESAROPS — Wreck Hunter",
+        "width": 1400,
+        "height": 900,
         "resizable": true,
         "fullscreen": false
       }

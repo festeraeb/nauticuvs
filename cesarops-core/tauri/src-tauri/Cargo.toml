@@ -1,13 +1,12 @@
 [package]
-name = "bagrecovery-frontend"
-version = "1.0.0"
-description = "Great Lakes Wreck Recovery Desktop Frontend"
-authors = []
+name = "cesarops-tauri"
+version = "0.1.0"
+description = "CESAROPS Wreck Recovery Desktop App"
+authors = ["CESAROPS"]
 edition = "2021"
-default-run = "bagrecovery-frontend"
 
 [lib]
-name = "bagrecovery_frontend_lib"
+name = "cesarops_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -20,5 +19,10 @@ tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rusqlite = { version = "0.31", features = ["bundled"] }
-zip = { version = "0.6", default-features = false, features = ["deflate"] }
+notify = "6.1"
+chrono = { version = "0.4", features = ["serde"] }
+
+[profile.release]
+opt-level = 1          # Fast build, small binary
+lto = false
+codegen-units = 16
