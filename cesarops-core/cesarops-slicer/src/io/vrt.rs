@@ -341,14 +341,12 @@ impl VrtDataset {
 
         // Extract band sources
         let mut bands = Vec::new();
-        let mut in_band = false;
         let mut current_band_num = 0;
 
         for line in xml.lines() {
             let trimmed = line.trim();
 
             if trimmed.starts_with("<VRTRasterBand") {
-                in_band = true;
                 current_band_num = Self::extract_attr(trimmed, "band")
                     .and_then(|v| v.parse::<usize>().ok())
                     .unwrap_or(bands.len() + 1);
@@ -387,10 +385,6 @@ impl VrtDataset {
                         };
                     }
                 }
-            }
-
-            if trimmed.starts_with("</VRTRasterBand>") {
-                in_band = false;
             }
         }
 

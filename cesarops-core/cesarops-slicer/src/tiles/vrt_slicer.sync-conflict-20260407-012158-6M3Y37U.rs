@@ -361,7 +361,7 @@ impl VrtTileSlicer {
     pub fn measure_drift(
         &self,
         manifest: &VrtTileManifest,
-        _pass_threshold_m: f64,
+        pass_threshold_m: f64,
     ) -> Vec<TileDrift> {
         let gt = self.vrt.geo_transform;
         let tile_size = self.tile_size as f64;
