@@ -246,131 +246,53 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--llm-plan", type=str, help='Ask Qwen to design sensor plan from natural language')
     parser.add_argument("--llm-interpret", action="store_true", help="Send results to Qwen after run")
-
-    # Remote dispatch
-    parser.add_argument("--remote", action="store_true", help="Use Pi→Xenon pipeline via SSH")
+    parser.add_argument("--monitor", action="store_true", help="Show live status from all nodes")
     parser.add_argument("--status", action="store_true", help="Ping all nodes and show connectivity")
-    parser.add_argument("--pi-slice", action="store_true", help="Run VRT stack + slice on Pi only")
-    parser.add_argument("--xenon-process", action="store_true", help="Run TPU/GPU processing on Xenon only")
-    parser.add_argument("--tile-size", type=int, default=1024, help="Tile size for slicing")
-    parser.add_argument("--target-res", type=float, default=10.0, help="Target resolution in meters")
     args = parser.parse_args()
 
-    # ── Node status ────────────────────────────────────────────────────────
-    if args.status:
-        from remote_dispatch import TaskDispatcher
-        d = TaskDispatcher()
-        status = d.status()
-        print(json.dumps(status, indent=2))
-        d.close()
-        return
-
-    # ── Pi-only: slice ─────────────────────────────────────────────────────
-    if args.pi_slice:
-        from remote_dispatch import TaskDispatcher, build_pi_slice_task
-        d = TaskDispatcher()
-
-        area_name = args.area
-        area_cfg = AGENT_CONFIG["areas"][area_name]
-        bbox = area_cfg["bbox"]
-
-        # Build source list from sensor config
-        sources = [
-            f"sentinel_b2.tif:B2_Blue:sentinel-2a",
-            f"sentinel_b4.tif:B4_Red:sentinel-2a",
-            f"landsat_b10.tif:B10_Thermal:landsat-9",
-        ]
-
-        result = d.task_pi_slice(
-            area_name=area_name,
-            bbox=bbox,
-            sources=sources,
-            tile_size=args.tile_size,
-            target_resolution=args.target_res,
-        )
-        print(json.dumps(result, indent=2))
-        d.close()
-        return
-
-    # ── Xenon-only: process ────────────────────────────────────────────────
-    if args.xenon_process:
-        from remote_dispatch import TaskDispatcher
-        d = TaskDispatcher()
-        result = d.task_xenon_process()
-        print(json.dumps(result, indent=2))
-        d.close()
-        return
-
-    # ── Full remote pipeline: Pi slices → Xenon processes ──────────────────
-    if args.remote:
-        from remote_dispatch import TaskDispatcher
-        d = TaskDispatcher()
-
-        area_name = args.area
-        area_cfg = AGENT_CONFIG["areas"][area_name]
-        bbox = area_cfg["bbox"]
-
-        log(f"=" * 60)
-        log(f"🛰️  REMOTE PIPELINE: {area_cfg['label']}")
-        log(f"  Step 1: Pi → VRT stack + slice + delegate routing")
-        log(f"  Step 2: Xenon → TPU/GPU processing on staged tiles")
-        log(f"=" * 60)
-
-        # Step 1: Pi slices
-        sources = [
-            f"sentinel_b2.tif:B2_Blue:sentinel-2a",
-            f"sentinel_b4.tif:B4_Red:sentinel-2a",
-            f"landsat_b10.tif:B10_Thermal:landsat-9",
-        ]
-        pi_result = d.task_pi_slice(
-            area_name=area_name,
-            bbox=bbox,
-            sources=sources,
-            tile_size=args.tile_size,
-            target_resolution=args.target_res,
-        )
-
-        if pi_result.get("exit_code") != 0:
-            log("❌ Pi slicing failed — aborting pipeline", "ERROR")
-            d.close()
+    # ── Node status / monitor ─────────────────────────────────────────────
+    if args.status or args.monitor:
+        try:
+            from remote_dispatch import TaskDispatcher
+        except ImportError:
+            log("remote_dispatch.py not found — cannot check nodes", "ERROR")
             return
 
-        # Step 2: Xenon processes
-        xenon_result = d.task_xenon_process()
+        d = TaskDispatcher()
+        status = d.status()
 
-        results = [
-            {"sensor": "pi_slicer", "status": "success" if pi_result["exit_code"] == 0 else "failed",
-             "output": pi_result.get("stdout", "")},
-            {"sensor": "xenon_processor", "status": "success" if xenon_result["exit_code"] == 0 else "failed",
-             "output": xenon_result.get("stdout", "")},
-        ]
+        if args.monitor:
+            print(f"\n{'='*60}")
+            print(f"CESAROPS LIVE MONITOR — {datetime.now().strftime('%H:%M:%S')}")
+            print(f"{'='*60}")
+            for node, info in status["nodes"].items():
+                emoji = "🟢" if info.get("online") else "🔴"
+                print(f"  {emoji} {node.upper()}: {info.get('host', '?')} {'online' if info.get('online') else 'OFFLINE'}")
+                if node == "xenon" and "tpu" in info:
+                    tpu = info["tpu"]
+                    tpu_status = tpu.get("status", "?")
+                    print(f"      TPU: {tpu_status}")
+                    if tpu.get("tpu_available"):
+                        print(f"      Model loaded: {tpu.get('model_loaded', False)}")
 
-        out_file = f"outputs/probes/remote_{area_name}_{datetime.now().strftime('%Y%m%d_%H%M')}.geojson"
-        fuse_to_geojson(results, out_file)
+            # Check for recent probe results
+            probe_dir = Path(__file__).parent / "outputs" / "probes"
+            if probe_dir.exists():
+                recent = sorted(probe_dir.glob("*.json"), key=os.path.getmtime, reverse=True)
+                if recent:
+                    latest = recent[0]
+                    age = datetime.now() - datetime.fromtimestamp(latest.stat().st_mtime)
+                    print(f"\n  📁 Latest probe: {latest.name} ({age.seconds}s ago)")
+                    data = json.loads(latest.read_text())
+                    for r in data.get("results_summary", []):
+                        s = r.get("status", "?")
+                        emoji = "✅" if s == "success" else "❌"
+                        print(f"    {emoji} {r['sensor']}: {s}")
 
-        # LLM interpretation
-        if args.llm_interpret:
-            if QWEN_API_KEY:
-                log("🤖 Sending results to Qwen for interpretation...")
-                try:
-                    briefing = llm_interpret_results(results, {
-                        "area": area_name,
-                        "thresholds": AGENT_CONFIG["thresholds"],
-                    })
-                    log("=" * 60)
-                    log("QWEN BRIEFING")
-                    log("=" * 60)
-                    print(briefing)
-                except Exception as e:
-                    log(f"Interpretation failed: {e}", "ERROR")
-            else:
-                log("QWEN_API_KEY not set — skipping interpretation", "WARN")
+            print(f"{'='*60}")
+        else:
+            print(json.dumps(status, indent=2))
 
-        successes = [r for r in results if r["status"] == "success"]
-        log("=" * 60)
-        log(f"📊 REMOTE PIPELINE COMPLETE: {len(successes)}/2 steps succeeded")
-        log(f"📁 Output: {out_file}")
-        log("=" * 60)
         d.close()
         return
 
