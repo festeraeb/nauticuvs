@@ -1,0 +1,309 @@
+/* ── Great Lakes Wreck Recovery — Global Styles ─────────────────────────────── */
+
+:root {
+  --bg: #0d1117;
+  --bg-card: #161b22;
+  --bg-hover: #1c2333;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-dim: #8b949e;
+  --accent: #58a6ff;
+  --accent-dim: #1f6feb;
+  --green: #3fb950;
+  --yellow: #d29922;
+  --red: #f85149;
+  --orange: #db6d28;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono: "Cascadia Code", "Fira Code", Consolas, monospace;
+  --radius: 8px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ── Layout ─────────────────────────────────────────────────────────────────── */
+
+.app-shell {
+  display: grid;
+  grid-template-rows: 48px 1fr;
+  grid-template-columns: 220px 1fr;
+  height: 100vh;
+}
+
+.topbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar h1 { font-size: 16px; font-weight: 600; white-space: nowrap; }
+.topbar .conn-badge {
+  font-size: 11px; padding: 2px 8px; border-radius: 12px;
+  font-weight: 500;
+}
+.conn-badge.online  { background: #0d4429; color: var(--green); }
+.conn-badge.offline { background: #3d1e1e; color: var(--red); }
+
+.topbar .search-box {
+  flex: 1;
+  max-width: 400px;
+  padding: 6px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+.topbar .search-box:focus { border-color: var(--accent); }
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 8px;
+  background: var(--bg-card);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.sidebar button {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 8px 12px;
+  background: none; border: none; border-radius: 6px;
+  color: var(--text-dim); font-size: 13px; cursor: pointer;
+  text-align: left;
+}
+.sidebar button:hover { background: var(--bg-hover); color: var(--text); }
+.sidebar button.active { background: var(--accent-dim); color: #fff; }
+.sidebar .section-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-dim); padding: 12px 12px 4px; font-weight: 600;
+}
+
+.main-content {
+  overflow: auto;
+  padding: 16px;
+}
+
+/* ── Cards ──────────────────────────────────────────────────────────────────── */
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.stat-card .stat-value { font-size: 28px; font-weight: 700; color: var(--accent); }
+.stat-card .stat-label { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+
+/* ── Wreck table ────────────────────────────────────────────────────────────── */
+
+.wreck-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.wreck-table th {
+  text-align: left; padding: 8px 12px;
+  background: var(--bg-card); border-bottom: 1px solid var(--border);
+  font-weight: 600; color: var(--text-dim); font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  position: sticky; top: 0; z-index: 1;
+}
+.wreck-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.wreck-table tr:hover td { background: var(--bg-hover); }
+.wreck-table tr { cursor: pointer; }
+
+/* ── Badges ─────────────────────────────────────────────────────────────────── */
+
+.badge {
+  display: inline-block; font-size: 11px; padding: 2px 8px;
+  border-radius: 12px; font-weight: 500;
+}
+.badge-strong   { background: #1a3a1a; color: var(--green); }
+.badge-moderate { background: #3a3010; color: var(--yellow); }
+.badge-weak     { background: #3d1e1e; color: var(--red); }
+.badge-steel    { background: #1f2d5a; color: var(--accent); }
+.badge-ore      { background: #3a2810; color: var(--orange); }
+.badge-coord-verified  { background: #1a3a1a; color: #3fb950; }
+.badge-coord-estimated { background: #3a3010; color: #f59e0b; }
+.badge-coord-warn      { background: #3d1e1e; color: #ef4444; }
+.badge-coord-none      { background: #2a2a2a; color: #888; }
+
+/* ── Detail panel ───────────────────────────────────────────────────────────── */
+
+.detail-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+.detail-panel h2 { font-size: 20px; margin-bottom: 12px; }
+.detail-grid {
+  display: grid; grid-template-columns: 140px 1fr; gap: 6px 16px;
+  font-size: 13px;
+}
+.detail-grid dt { color: var(--text-dim); font-weight: 500; }
+.detail-grid dd { color: var(--text); }
+
+.mag-bar {
+  height: 8px; border-radius: 4px; background: var(--border); overflow: hidden;
+}
+.mag-bar-fill { height: 100%; border-radius: 4px; background: var(--accent); }
+
+/* ── Map canvas ─────────────────────────────────────────────────────────────── */
+
+.map-container {
+  position: relative;
+  width: 100%;
+  height: calc(100vh - 120px);
+  background: #0a1628;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.map-container canvas { width: 100%; height: 100%; }
+
+.map-legend {
+  position: absolute; top: 12px; right: 12px;
+  background: rgba(13,17,23,0.9); border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px 14px; font-size: 11px;
+}
+.map-legend .legend-item { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+.map-legend .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+/* ── Pagination ─────────────────────────────────────────────────────────────── */
+
+.pagination {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px; font-size: 13px;
+}
+.pagination button {
+  background: var(--bg-card); border: 1px solid var(--border);
+  color: var(--text); padding: 4px 12px; border-radius: 6px;
+  cursor: pointer; font-size: 13px;
+}
+.pagination button:hover { background: var(--bg-hover); }
+.pagination button:disabled { opacity: 0.4; cursor: default; }
+
+/* ── Filters bar ────────────────────────────────────────────────────────────── */
+
+.filters-bar {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 12px; flex-wrap: wrap;
+}
+.filters-bar label { font-size: 12px; color: var(--text-dim); }
+.filters-bar select, .filters-bar input[type="checkbox"] {
+  background: var(--bg); border: 1px solid var(--border);
+  color: var(--text); border-radius: 4px; padding: 4px 8px; font-size: 12px;
+}
+
+/* ── Loading / empty ────────────────────────────────────────────────────────── */
+
+.loading { text-align: center; padding: 40px; color: var(--text-dim); }
+.empty-state { text-align: center; padding: 60px; color: var(--text-dim); font-size: 14px; }
+
+/* ── Wreckhunter 2000 branding ──────────────────────────────────────────────── */
+
+.topbar-brand {
+  display: flex; align-items: center; gap: 10px;
+  white-space: nowrap;
+}
+.topbar-brand h1 {
+  font-size: 15px; font-weight: 800; letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: linear-gradient(90deg, #58a6ff 0%, #79c0ff 60%, #56d364 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.brand-anchor {
+  font-size: 18px; line-height: 1;
+  filter: drop-shadow(0 0 4px #58a6ff88);
+}
+.brand-year {
+  color: var(--accent);
+  -webkit-text-fill-color: var(--accent);
+}
+.topbar-api-url {
+  font-size: 11px; opacity: 0.5; font-family: var(--mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;
+}
+
+/* ── Shared form primitives (used by pipeline panels + ExportPanel) ─────────── */
+
+.tool-form {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  max-width: 720px;
+  display: flex; flex-direction: column; gap: 18px;
+}
+.form-row {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.form-label {
+  font-size: 12px; font-weight: 600; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.form-hint {
+  font-size: 11px; color: var(--text-dim);
+}
+.form-input {
+  background: var(--bg); border: 1px solid var(--border);
+  color: var(--text); border-radius: 6px;
+  padding: 7px 10px; font-size: 13px; outline: none;
+  font-family: var(--font);
+}
+.form-input:focus { border-color: var(--accent); }
+
+/* Shared buttons */
+.btn-primary {
+  padding: 8px 18px; border-radius: 6px;
+  background: var(--accent-dim); color: #fff;
+  border: none; font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-primary:hover:not(:disabled) { background: var(--accent); }
+.btn-primary:disabled { opacity: 0.5; cursor: default; }
+.btn-secondary {
+  padding: 7px 14px; border-radius: 6px;
+  background: var(--bg-hover); color: var(--text);
+  border: 1px solid var(--border); font-size: 12px; cursor: pointer;
+  white-space: nowrap;
+}
+.btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Status banners */
+.error-banner {
+  background: #3d1e1e; border: 1px solid var(--red);
+  color: var(--red); border-radius: 6px;
+  padding: 10px 14px; font-size: 13px;
+}
+.success-banner {
+  background: #0d3321; border: 1px solid var(--green);
+  color: var(--green); border-radius: 6px;
+  padding: 12px 16px; font-size: 13px;
+}

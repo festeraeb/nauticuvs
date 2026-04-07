@@ -9,8 +9,14 @@ build/
 # Secrets
 .env
 
+# Tauri
+tauri/node_modules/
+tauri/target/
+tauri/dist/
+tauri/src-tauri/target/
+
 # Rust target
-target/
+cesarops-slicer/target/
 
 # IDE
 .vscode/settings.json
