@@ -404,7 +404,7 @@ impl VrtDataset {
     /// For each virtual band, reads from the appropriate source file
     /// and resamples if needed.
     ///
-    /// Returns `[band, row, col]` shaped array.
+    /// Returns `[band, row, col]` shaped array — one 2D plane per VRT band.
     pub fn read_window(
         &self,
         x_off: u32,
@@ -426,11 +426,11 @@ impl VrtDataset {
             let src_w = ((x_size as f64) / scale).ceil() as u32;
             let src_h = ((y_size as f64) / scale).ceil() as u32;
 
-            // Read from source
+            // Read from source (may have multiple bands)
             let window = source.read_window(src_x, src_y, src_w, src_h)
                 .map_err(|e| VrtError::SourceOpen(e.to_string()))?;
 
-            // Resample if needed
+            // Resample if needed — returns Vec<Vec<Vec<u8>>> [src_band, row, col]
             let band_data = if scale > 1.5 {
                 // Source is lower res — bilinear upscale
                 Self::bilinear_upscale(&window, x_size as usize, y_size as usize)
@@ -438,18 +438,23 @@ impl VrtDataset {
                 // Source is higher res — downscale with averaging
                 Self::bilinear_downscale(&window, x_size as usize, y_size as usize)
             } else {
-                // Close enough — just crop to target size
-                let data = window.iter().copied().collect::<Vec<_>>();
-                // Reshape to 2D [row, col] (single band)
+                // Close enough — extract directly
                 let rows = window.shape()[1];
                 let cols = window.shape()[2];
-                data.chunks(cols)
-                    .take(rows)
-                    .map(|r| r.to_vec())
+                let src_bands = window.shape()[0];
+                (0..src_bands)
+                    .map(|b| {
+                        (0..rows)
+                            .map(|r| window.slice(ndarray::s![b, r, ..]).to_vec())
+                            .collect()
+                    })
                     .collect()
             };
 
-            all_bands.push(band_data);
+            // Take the first band from the source (each VRT band = one source band)
+            if let Some(first_band) = band_data.into_iter().next() {
+                all_bands.push(first_band);
+            }
         }
 
         Ok(all_bands)
