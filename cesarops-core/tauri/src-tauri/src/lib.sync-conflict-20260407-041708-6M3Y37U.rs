@@ -53,41 +53,22 @@ async fn run_task(
     let mode = AppMode::Thin;
     let python = mode.python();
 
-    // Resolve work directory to absolute path
-    let work_dir = {
-        let raw = match cwd {
-            Some(ref d) if !d.is_empty() => d.clone(),
-            _ => std::env::current_dir()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| ".".into()),
-        };
-        let p = std::path::Path::new(&raw);
-        if p.is_absolute() {
-            raw
-        } else {
-            // Resolve relative path from current_exe parent
-            std::env::current_dir()
-                .ok()
-                .and_then(|cwd| cwd.join(p).canonicalize().ok())
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or(raw)
-        }
-    };
-
     let mut cmd = Command::new(python);
-    cmd.current_dir(&work_dir);
     cmd.arg(&script);
     cmd.args(&args);
+    if let Some(dir) = &cwd {
+        cmd.current_dir(dir);
+    }
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
 
     let mut child = cmd.spawn()
-        .map_err(|e| format!("Failed to spawn '{}': {} (cwd={})", script, e, work_dir))?;
+        .map_err(|e| format!("Failed to start {}: {}", script, e))?;
 
     app.emit("task_started", &TaskOutput {
         id: task_id.clone(),
         status: "running".into(),
-        stdout: format!("Spawned: {} {}\nWorking dir: {}\n---\n", python, script, work_dir),
+        stdout: String::new(),
         stderr: String::new(),
         duration_s: 0.0,
     }).ok();
