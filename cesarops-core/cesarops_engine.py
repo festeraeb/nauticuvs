@@ -60,10 +60,13 @@ for letter in "DEFGHIJKLMNOPQRSTUVWXYZ":
 # TPU Server
 # Laptop: points to Xenon (10.0.0.55)
 # Xenon: points to localhost
-TPU_SERVER_URL = "http://localhost:5001"  # Change to "http://10.0.0.55:5001" for remote
+TPU_SERVER_URL = os.environ.get("TPU_SERVER_URL", "http://localhost:5001")
 
-# Cloudflare API (command queue)
-CLOUDFLARE_API = "https://your-worker.your-subdomain.workers.dev"
+# Cloudflare API (command queue) — configure via .env or environment variable
+CLOUDFLARE_API = os.environ.get(
+    "CLOUDFLARE_API",
+    "https://your-worker.your-subdomain.workers.dev"
+)
 
 # GPU processing (use existing CUDA test code)
 USE_GPU = True

@@ -31,7 +31,7 @@ def load_env(path: Path) -> Dict[str, str]:
     """Parse a simple .env file into a dict."""
     env = {}
     if path.exists():
-        for line in path.read_text().splitlines():
+        for line in path.read_text(encoding='utf-8').splitlines():
             line = line.strip()
             if not line or line.startswith('#') or '=' not in line:
                 continue
@@ -44,6 +44,93 @@ QWEN_API_KEY = os.environ.get("QWEN_API_KEY", _dotenv.get("QWEN_API_KEY", ""))
 QWEN_MODEL = os.environ.get("QWEN_MODEL", _dotenv.get("QWEN_MODEL", "qwen-plus"))
 QWEN_BASE_URL = os.environ.get("QWEN_BASE_URL", _dotenv.get("QWEN_BASE_URL",
     "https://dashscope.aliyuncs.com/compatible-mode/v1"))
+
+# ── API Key Setup Helper ─────────────────────────────────────────────────────
+
+def check_and_prompt_api_keys() -> Dict[str, str]:
+    """
+    Check for required API keys and prompt user interactively if missing.
+    Returns a dict of found/entered keys. Creates .env file if it doesn't exist.
+    """
+    env_path = Path(__file__).parent / ".env"
+    keys_found = {}
+    keys_needed = {}
+
+    # Check existing keys
+    if QWEN_API_KEY:
+        keys_found['QWEN_API_KEY'] = QWEN_API_KEY[:20] + "..."
+    else:
+        keys_needed['QWEN_API_KEY'] = {
+            'prompt': "Qwen (DashScope) API key — for AI Director parsing & result interpretation",
+            'url': "https://dashscope.console.aliyun.com/",
+        }
+
+    earthdata = os.environ.get("EARTHDATA_TOKEN", _dotenv.get("EARTHDATA_TOKEN", ""))
+    if earthdata:
+        keys_found['EARTHDATA_TOKEN'] = earthdata[:20] + "..."
+    else:
+        keys_needed['EARTHDATA_TOKEN'] = {
+            'prompt': "NASA Earthdata token — for SWOT, ICESat-2, and HLS downloads",
+            'url': "https://urs.earthdata.nasa.gov/",
+        }
+
+    # Report status
+    if keys_found:
+        print("\n✓ API Keys Found:")
+        for key, val in keys_found.items():
+            print(f"  {key}: {val}")
+
+    if keys_needed:
+        print("\n⚠ Missing API Keys:")
+        for key, info in keys_needed.items():
+            print(f"  ✗ {key}: {info['prompt']}")
+            print(f"    Register at: {info['url']}")
+
+        # Interactive prompt
+        print("\n──────────────────────────────────────────────────────────────")
+        print("You can enter API keys now, or skip and use --no-llm mode.")
+        print("Keys will be saved to .env for future use.")
+        print("──────────────────────────────────────────────────────────────\n")
+
+        new_keys = {}
+        for key, info in keys_needed.items():
+            while True:
+                val = input(f"Enter {key} (or press Enter to skip): ").strip()
+                if val:
+                    new_keys[key] = val
+                    break
+                elif input("  Skip this key? (y/n): ").strip().lower() == 'n':
+                    continue  # Ask again
+                else:
+                    break  # Skip
+
+        if new_keys:
+            # Load existing .env or create new one
+            existing = {}
+            if env_path.exists():
+                existing = load_env(env_path)
+
+            existing.update(new_keys)
+
+            # Write .env file
+            lines = []
+            for k, v in existing.items():
+                lines.append(f"{k}={v}")
+            env_path.write_text('\n'.join(lines) + '\n')
+
+            print(f"\n✓ Saved {len(new_keys)} key(s) to {env_path}")
+
+            # Update current session via module reload
+            import importlib
+            if 'QWEN_API_KEY' in new_keys:
+                # Directly update the module-level variable
+                import sys
+                mod = sys.modules[__name__]
+                mod.QWEN_API_KEY = new_keys['QWEN_API_KEY']
+
+            return new_keys
+
+    return {}
 
 
 # ── Bounding box presets ─────────────────────────────────────────────────────
@@ -459,11 +546,42 @@ def main():
     parser.add_argument('--interpret', '-i', type=str, nargs='*', help='Interpret existing result JSON files')
     parser.add_argument('--no-llm', action='store_true', help='Disable Qwen, use keyword matching')
     parser.add_argument('--output', '-o', type=str, help='Save results to JSON')
+    parser.add_argument('--setup-keys', action='store_true', help='Interactively configure API keys')
+    parser.add_argument('--data-sources', action='store_true', help='List available satellite data sources')
     args = parser.parse_args()
+
+    # ── Setup API keys ─────────────────────────────────────────────────────
+    if args.setup_keys:
+        check_and_prompt_api_keys()
+        return
+
+    # ── List data sources ──────────────────────────────────────────────────
+    if args.data_sources:
+        src_path = Path(__file__).parent / "satellite_data_sources.json"
+        if src_path.exists():
+            data = json.loads(src_path.read_text())
+            print(f"\n{'='*100}")
+            print("SATELLITE DATA SOURCES")
+            print(f"{'='*100}")
+            for src_id, src in data['satellite_data_sources'].items():
+                print(f"\n  {src_id}")
+                print(f"    Name: {src['name']}")
+                print(f"    {src['description']}")
+                print(f"    URL: {src['url']}")
+                print(f"    Auth: {'API key required' if src['requires_api_key'] else 'Open access'}")
+                if 'env_key' in src:
+                    print(f"    Env var: {src['env_key']}")
+                if 'notes' in src:
+                    print(f"    Notes: {src['notes']}")
+            print(f"\n{'='*100}")
+        else:
+            print("satellite_data_sources.json not found")
+        return
 
     if not QWEN_API_KEY:
         print("⚠ QWEN_API_KEY not set — LLM features disabled")
-        print("  Set it in .env or: export QWEN_API_KEY=sk-...")
+        print("  Run: python ai_director.py --setup-keys")
+        print("  Or set in .env: QWEN_API_KEY=sk-...")
 
     # ── Interpret mode ─────────────────────────────────────────────────────
     if args.interpret is not None:
@@ -482,9 +600,7 @@ def main():
                     "Review these CESAROPS sensor results and provide:\n"
                     "1. Executive summary\n"
                     "2. Key anomalies to investigate\n"
-                    "3. Recommended next steps — ONLY parameter adjustments on existing tools "
-                    "(e.g., 'raise thermal_zscore to 3.0', 'add SAR sensor'). "
-                    "Do NOT suggest writing new code or new tools without explicit human approval.\n"
+                    "3. Recommended next steps\n"
                     "Be concise, use bullet points."
                 )},
                 {"role": "user", "content": json.dumps(results_data, indent=2)[:4000]},

@@ -7,9 +7,109 @@
 //!
 //! The backend is a thin wrapper: spawns Python → captures stdout → sends to React frontend.
 
+use std::path::PathBuf;
 use std::process::Command;
 use tauri::Emitter;
 use serde::{Deserialize, Serialize};
+
+/// Resolve the cesarops-core directory relative to this binary's location.
+/// Falls back to the current working directory if not found.
+fn resolve_core_dir() -> PathBuf {
+    // Strategy 1: Check if we're running from within cesarops-core/tauri/
+    // → core is at ../..
+    if let Ok(cwd) = std::env::current_dir() {
+        // Try going up from tauri/ → cesarops-core/
+        let candidate = cwd.join("..").canonicalize().ok();
+        if let Some(dir) = &candidate {
+            if dir.join("ai_director.py").exists() {
+                return dir.clone();
+            }
+        }
+        // Try going up two levels
+        let candidate2 = cwd.join("../..").canonicalize().ok();
+        if let Some(dir) = &candidate2 {
+            if dir.join("ai_director.py").exists() {
+                return dir.clone();
+            }
+        }
+    }
+
+    // Strategy 2: Use the directory of the running executable
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            // Check if cesarops-core is next to the Tauri binary
+            let candidate = parent.join("../../cesarops-core").canonicalize().ok();
+            if let Some(dir) = &candidate {
+                if dir.join("ai_director.py").exists() {
+                    return dir.clone();
+                }
+            }
+        }
+    }
+
+    // Strategy 3: Check environment variable (set by user or installer)
+    if let Ok(dir) = std::env::var("CESAROPS_CORE_DIR") {
+        let p = PathBuf::from(&dir);
+        if p.join("ai_director.py").exists() {
+            return p;
+        }
+    }
+
+    // Strategy 4: Check common user development paths
+    if let Ok(home) = std::env::var("USERPROFILE") {
+        let dev_paths = [
+            "programming/cesarops-core",
+            "Projects/cesarops-core",
+            "Desktop/cesarops-core",
+            "Documents/cesarops-core",
+        ];
+        for sub in &dev_paths {
+            let candidate = PathBuf::from(&home).join(sub).canonicalize().ok();
+            if let Some(dir) = &candidate {
+                if dir.join("ai_director.py").exists() {
+                    return dir.clone();
+                }
+            }
+        }
+    }
+
+    // Strategy 5: Fall back to current working directory
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+/// Resolve a user-provided work directory. If it's empty, relative (like ".."),
+/// or doesn't contain ai_director.py, use resolve_core_dir() instead.
+fn resolve_work_dir(user_dir: &str) -> PathBuf {
+    // If empty, use resolve_core_dir()
+    if user_dir.is_empty() {
+        return resolve_core_dir();
+    }
+
+    let p = PathBuf::from(user_dir);
+
+    // If relative (e.g. "..", "../"), resolve it
+    if !p.is_absolute() {
+        if let Ok(cwd) = std::env::current_dir() {
+            let resolved = cwd.join(&p).canonicalize().ok();
+            if let Some(dir) = &resolved {
+                // Verify it looks like cesarops-core
+                if dir.join("ai_director.py").exists() {
+                    return dir.clone();
+                }
+            }
+        }
+        // Relative path didn't resolve to cesarops-core → use auto-detect
+        return resolve_core_dir();
+    }
+
+    // Absolute path — verify it contains our scripts
+    if p.join("ai_director.py").exists() {
+        return p;
+    }
+
+    // Doesn't look like cesarops-core → use auto-detect
+    resolve_core_dir()
+}
 
 /// App mode — set at build or runtime
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,12 +250,14 @@ async fn ai_direct_request(
     request: String,
     work_dir: String,
 ) -> Result<TaskOutput, String> {
+    let actual_work_dir = resolve_work_dir(&work_dir);
+
     run_task(
         app,
         "ai_direct".into(),
         "ai_director.py".into(),
         vec!["--request".into(), request, "--execute".into()],
-        Some(work_dir),
+        Some(actual_work_dir.to_string_lossy().to_string()),
     ).await
 }
 
@@ -165,12 +267,14 @@ async fn run_background_probe(
     app: tauri::AppHandle,
     work_dir: String,
 ) -> Result<TaskOutput, String> {
+    let actual_work_dir = resolve_work_dir(&work_dir);
+
     run_task(
         app,
         "probe".into(),
         "background_probe.py".into(),
         vec!["--once".into()],
-        Some(work_dir),
+        Some(actual_work_dir.to_string_lossy().to_string()),
     ).await
 }
 
@@ -180,22 +284,26 @@ async fn check_nodes(
     app: tauri::AppHandle,
     work_dir: String,
 ) -> Result<TaskOutput, String> {
+    let actual_work_dir = resolve_work_dir(&work_dir);
+
     run_task(
         app,
         "status".into(),
         "cesarops_orchestrator.py".into(),
         vec!["--status".into()],
-        Some(work_dir),
+        Some(actual_work_dir.to_string_lossy().to_string()),
     ).await
 }
 
 /// List known wrecks
 #[tauri::command]
 async fn list_wrecks(work_dir: String) -> Result<String, String> {
+    let actual_work_dir = resolve_work_dir(&work_dir);
+
     let output = Command::new("python")
         .arg("wreck_scraper.py")
         .arg("--list")
-        .current_dir(&work_dir)
+        .current_dir(&actual_work_dir)
         .output()
         .map_err(|e| format!("Failed: {}", e))?;
 

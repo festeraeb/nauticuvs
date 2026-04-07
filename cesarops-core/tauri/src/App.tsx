@@ -67,15 +67,12 @@ export default function App() {
     setPanel("list");
   };
 
-  type ActivePanel = "stats" | "list" | "detail" | "harvest" | "map" | "scan" | "mag" | "erie" | "restore" | "pdf" | "export" | "loran" | "sensors" | "agent";
-
   const handleSetPanel = (panel: ActivePanel) => {
     setPanel(panel);
   };
 
   return (
     <div className="app-shell">
-      {online && <AutoBagPrompt />}
       <AutoBagPrompt />
       {/* ── Top bar ────────────────────────────────────── */}
       <div className="topbar">

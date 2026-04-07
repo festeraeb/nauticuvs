@@ -63,7 +63,7 @@ AGENT_CONFIG = {
 def _load_env(path: Path) -> dict:
     env = {}
     if path.exists():
-        for line in path.read_text().splitlines():
+        for line in path.read_text(encoding='utf-8').splitlines():
             line = line.strip()
             if line and not line.startswith('#') and '=' in line:
                 k, _, v = line.partition('=')

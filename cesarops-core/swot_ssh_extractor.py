@@ -34,10 +34,20 @@ DB_PATH = REPO / 'LAKE_MICHIGAN_CENSUS_2026.db'
 OUT_DIR = REPO / 'outputs' / 'calibration'
 SSH_OUT = OUT_DIR / 'swot_ssh_anomalies.json'
 
-_TOKEN_PATHS = [
-    Path('c:/Users/thomf/programming/Bagrecovery/erie_remote/erie_remote_data/.earthdata_token'),
-    Path('c:/Users/thomf/programming/Bagrecovery/sentinel_hunt/earthdata_token.json'),
-]
+# Earthdata token paths — configurable via .env or environment variables
+def _get_token_paths() -> list:
+    """Get possible Earthdata token locations from .env or defaults."""
+    env_token = os.environ.get('EARTHDATA_TOKEN', '')
+    if env_token:
+        return []  # Token provided directly via env var
+
+    # Default fallback paths
+    return [
+        Path('c:/Users/thomf/programming/Bagrecovery/erie_remote/erie_remote_data/.earthdata_token'),
+        Path('c:/Users/thomf/programming/Bagrecovery/sentinel_hunt/earthdata_token.json'),
+    ]
+
+_TOKEN_PATHS = _get_token_paths()
 
 # Only download Expert product — has all geophysical corrections
 EXPERT_TAG = 'SSH_Expert'
@@ -48,6 +58,23 @@ SNAP_RADIUS_M = 12_000.0   # SWOT LR swath half-width ~10 km
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _load_token() -> str:
+    # Check environment variable first
+    env_token = os.environ.get('EARTHDATA_TOKEN', '')
+    if env_token:
+        return env_token
+
+    # Check .env file
+    env_path = Path(__file__).parent / '.env'
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if line.startswith('EARTHDATA_TOKEN='):
+                _, _, val = line.partition('=')
+                token = val.strip()
+                if token:
+                    return token
+
+    # Fall back to token files
     for tp in _TOKEN_PATHS:
         if tp.exists():
             try:

@@ -16,6 +16,7 @@ Processing Pipeline:
 
 import numpy as np
 import os
+import sys
 import json
 from pathlib import Path
 from datetime import datetime
@@ -27,19 +28,26 @@ import math
 # CONFIGURATION - REAL FILE PATHS ONLY
 # ============================================================================
 
-# Point to local data (Corrected path to workspace)
-DATA_BASE = Path(r"C:\Users\thomf\programming\cesarops-wreckhunter build\wreckhunter2000\data\cache\census_raw")
-LANDSAT_DIR = DATA_BASE / "2021_low_water"
-SENTINEL_DIR = DATA_BASE / "2025_rossa"
+# Point to local data — configurable via .env or environment variables
+def _get_path(env_var: str, default: str) -> Path:
+    """Get path from environment variable or use default."""
+    val = os.environ.get(env_var, os.environ.get(env_var, default))
+    return Path(val)
+
+DATA_BASE = _get_path('DATA_BASE', r"C:\Users\thomf\programming\cesarops-wreckhunter build\wreckhunter2000\data\cache\census_raw")
+LANDSAT_DIR = _get_path('LANDSAT_DIR', DATA_BASE / "2021_low_water")
+SENTINEL_DIR = _get_path('SENTINEL_DIR', DATA_BASE / "2025_rossa")
 OUTPUT_DIR = Path(r"outputs/hard_pixel_audit")
 
-# Safety Check
-if not DATA_BASE.exists():
-    print(f"⚠️ WARNING: Data base not found at {DATA_BASE}")
-    print("   Please ensure satellite data is downloaded to this path.")
-    sys.exit(1)
-else:
-    print(f"✅ Data Base Found: {DATA_BASE}")
+# Safety Check — raise exception instead of sys.exit to avoid killing parent process
+def _check_data_path():
+    if not DATA_BASE.exists():
+        raise FileNotFoundError(
+            f"Data base not found at {DATA_BASE}\n"
+            f"   Please ensure satellite data is downloaded to this path."
+        )
+
+_check_data_path()
 
 # Ensure output directory exists
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -602,13 +610,13 @@ def main():
     print("█  Rule #1 Active: Processing actual satellite TIFF files")
     print("█" * 100)
     print()
-    
+
     print(f"Data Directory: {DATA_BASE}")
     print(f"Landsat Dir: {LANDSAT_DIR}")
     print(f"Sentinel Dir: {SENTINEL_DIR}")
     print(f"Output Dir: {OUTPUT_DIR}")
     print()
-    
+
     # Verify data directories exist
     if not LANDSAT_DIR.exists():
         print(f"ERROR: Landsat directory not found: {LANDSAT_DIR}")

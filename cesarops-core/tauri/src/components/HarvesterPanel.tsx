@@ -10,7 +10,7 @@
  *   5. On completion shows ping count, output CSV path, and survey table
  */
 import { useState, useEffect, useRef } from "react";
-import type { WarpFieldInfo, HarvesterJobStatus, HarvesterRequest } from "../types";
+import type { WarpFieldInfo, HarvesterJobStatus, HarvesterRequest, HarvesterResult, HarvesterSurveyResult } from "../types";
 import {
   getApiBase, resetConnectionState,
   getWarpFieldInfo,
@@ -83,7 +83,7 @@ export default function HarvesterPanel() {
   // Job state
   const [jobId, setJobId]             = useState<string | null>(null);
   const [jobStatus, setJobStatus]     = useState<HarvesterJobStatus | null>(null);
-  const [catalog, setCatalog]         = useState<Record<string, unknown> | null>(null);
+  const [catalog, setCatalog]         = useState<HarvesterResult | null>(null);
   const [submitting, setSubmitting]   = useState(false);
   const [error, setError]             = useState<string | null>(null);
   const [backendOnline, setBackendOnline] = useState(false);
@@ -129,7 +129,7 @@ export default function HarvesterPanel() {
     if (["completed", "failed"].includes(jobStatus.status)) {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
       if (jobStatus.status === "completed") {
-        void getHarvesterCatalog(lake).then(setCatalog).catch(() => null);
+        void getHarvesterCatalog(lake).then((c) => setCatalog(c as unknown as HarvesterResult)).catch(() => null);
       }
       return;
     }
@@ -142,7 +142,7 @@ export default function HarvesterPanel() {
         if (["completed", "failed"].includes(s.status)) {
           if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
           if (s.status === "completed") {
-            void getHarvesterCatalog(lake).then(setCatalog).catch(() => null);
+            void getHarvesterCatalog(lake).then((c) => setCatalog(c as unknown as HarvesterResult)).catch(() => null);
           }
         }
       } catch { /* keep polling */ }
@@ -215,7 +215,7 @@ export default function HarvesterPanel() {
   const handleLoadCatalog = async () => {
     try {
       const c = await getHarvesterCatalog(lake);
-      setCatalog(c);
+      setCatalog(c as unknown as HarvesterResult);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No catalog — run a harvest first");
     }
@@ -502,8 +502,8 @@ export default function HarvesterPanel() {
           {/* Summary row */}
           <div style={{ display: "flex", gap: 24, marginBottom: 12, flexWrap: "wrap" }}>
             {[
-              { label: "Total pings", value: ((catalog.total_pings as number) ?? 0).toLocaleString() },
-              { label: "Surveys", value: (catalog.surveys as unknown[])?.length ?? 0 },
+              { label: "Total pings", value: String(catalog.total_pings ?? 0) },
+              { label: "Surveys", value: String(catalog.surveys?.length ?? 0) },
               { label: "Warp applied", value: catalog.warp_applied ? "✓ Yes" : "✗ No" },
               { label: "Output CSV", value: catalog.output_csv ? "generated" : "—" },
             ].map(({ label, value }) => (
@@ -515,7 +515,10 @@ export default function HarvesterPanel() {
           </div>
 
           {/* Survey table */}
-          {Array.isArray(catalog.surveys) && (catalog.surveys as unknown[]).length > 0 && (
+          {(() => {
+            const surveys: HarvesterSurveyResult[] = catalog.surveys ?? [];
+            if (surveys.length === 0) return null;
+            return (
             <div style={{ overflowX: "auto" }}>
               <table style={{ fontSize: 11, borderCollapse: "collapse", width: "100%" }}>
                 <thead>
@@ -529,38 +532,39 @@ export default function HarvesterPanel() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(catalog.surveys as Record<string, unknown>[]).slice(0, 80).map((s, i) => (
+                  {surveys.slice(0, 80).map((s, i) => (
                     <tr key={i}>
-                      <td style={{ padding: "3px 10px", fontFamily: "var(--mono)" }}>{s.survey_id as string}</td>
-                      <td style={{ padding: "3px 10px" }}>{s.source as string}</td>
+                      <td style={{ padding: "3px 10px", fontFamily: "var(--mono)" }}>{s.survey_id}</td>
+                      <td style={{ padding: "3px 10px" }}>{s.source}</td>
                       <td style={{
                         padding: "3px 10px",
                         color: s.status === "downloaded" ? "#22c55e"
                              : s.status === "cached"     ? "#86efac"
                              : s.status === "failed"     ? "#ef4444"
                              : "var(--text-dim)",
-                      }}>{s.status as string}</td>
+                      }}>{s.status}</td>
                       <td style={{ padding: "3px 10px", textAlign: "right", fontFamily: "var(--mono)" }}>
-                        {((s.pings as number) || 0).toLocaleString()}
+                        {(s.pings || 0).toLocaleString()}
                       </td>
                       <td style={{ padding: "3px 10px", color: "#f59e0b", fontSize: 10 }}>
-                        {(s.error as string) || ""}
+                        {s.error || ""}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              {(catalog.surveys as unknown[]).length > 80 && (
+              {surveys.length > 80 && (
                 <p style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 4 }}>
-                  Showing first 80 of {(catalog.surveys as unknown[]).length} surveys.
+                  Showing first 80 of {surveys.length} surveys.
                 </p>
               )}
             </div>
-          )}
+            );
+          })()}
 
           {catalog.output_csv && (
             <p style={{ marginTop: 10, fontSize: 12, fontFamily: "var(--mono)", color: "var(--text-dim)" }}>
-              Merged CSV: {catalog.output_csv as string}
+              Merged CSV: {catalog.output_csv}
             </p>
           )}
         </div>

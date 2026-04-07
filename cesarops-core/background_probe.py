@@ -28,7 +28,7 @@ from typing import Dict, List, Optional
 def _load_env(path: Path) -> dict:
     env = {}
     if path.exists():
-        for line in path.read_text().splitlines():
+        for line in path.read_text(encoding='utf-8').splitlines():
             line = line.strip()
             if line and not line.startswith('#') and '=' in line:
                 k, _, v = line.partition('=')
@@ -221,9 +221,6 @@ def qwen_tune_warp_params(warp_result: dict, probe_results: list) -> dict:
         return json.loads(raw)
     except Exception:
         return {}
-
-
-def qwen_analyze_results(wreck_name: str, probe_results: list) -> dict:
     """Send probe results to Qwen for parameter tuning recommendations."""
     if not QWEN_API_KEY:
         return {"error": "QWEN_API_KEY not set"}

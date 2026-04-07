@@ -1,22 +1,11 @@
 #!/usr/bin/env python3
 """
-Full Lake Michigan Scan - M2200 CUDA TO KMZ Output
+Full Lake Michigan Scan — CPU/GPU Hybrid Z-Score to KMZ Output
 Processes all TIFFs with 8-point anchor-lock calibration and exports to Google Earth
 
-8-Point Anchor Lock System:
-SOUTHERN:
-- Chicago Harbor Light: 41.8900°N, -87.6044°W (IL)
-- Waukegan Harbor Light: 42.3638°N, -87.8034°W (IL)
-- Michigan City Light: 41.7258°N, -86.9047°W (IN)
-
-MID-LAKE:
-- Wind Point Light: 42.8000°N, -87.8178°W (WI)
-- Holland Harbor Light: 42.7784°N, -86.2066°W (MI)
-- Muskegon South Pier Light: 43.2314°N, -86.3481°W (MI)
-
-NORTHERN (Straits):
-- Sturgeon Bay Ship Canal Light: 44.7947°N, -87.3142°W (WI)
-- Point Betsie Light: 44.6919°N, -86.2544°W (MI)
+GPU: CuPy on M2200 (Quadro M2200, Maxwell sm_52, 4GB)
+     Falls back to NumPy CPU if CuPy unavailable or nvcc-dependent.
+CPU: NumPy with rasterio warp for CRS transforms.
 """
 
 import os
@@ -32,10 +21,39 @@ from cuda_env import configure_cuda_environment
 cuda_info = configure_cuda_environment()
 cuda_bin = cuda_info['cuda_bin']
 
-import cupy as cp
 import rasterio
 from rasterio.transform import xy
 from pyproj import Transformer
+
+# Try to import CuPy for GPU acceleration
+# We test in a subprocess with timeout to avoid hanging on nvcc
+HAS_GPU = False
+cp = None
+
+def _test_cupy():
+    """Test if CuPy works without nvcc dependency (runs in subprocess)."""
+    try:
+        import cupy as _cp
+        _test = _cp.array([1.0, 2.0, 3.0])
+        _s = float(_cp.sum(_test))
+        return abs(_s - 6.0) < 0.001
+    except Exception:
+        return False
+
+if __name__ != '__main__':
+    # When imported as module, test CuPy via subprocess with timeout
+    import subprocess
+    result = subprocess.run(
+        [sys.executable, '-c',
+         'import cupy; t=cupy.array([1,2,3]); print(float(cupy.sum(t)))'],
+        capture_output=True, text=True, timeout=8
+    )
+    if result.returncode == 0 and '6.0' in result.stdout:
+        import cupy as cp
+        HAS_GPU = True
+        print("  GPU: CuPy enabled (M2200 Quadro)")
+    else:
+        print(f"  GPU: CuPy unavailable — using NumPy CPU fallback")
 
 # 8-POINT ANCHOR LOCK CALIBRATION - Full Lake Michigan Coverage
 ANCHOR_POINTS = {
@@ -55,29 +73,18 @@ ANCHOR_POINTS = {
 }
 
 def apply_anchor_calibration(lat, lon):
-    """Apply 4-point anchor-lock calibration correction"""
-    # Calculate distance-weighted correction from anchor points
-    total_weight = 0
-    corrected_lat = 0
-    corrected_lon = 0
-    
-    for anchor in ANCHOR_POINTS.values():
-        # Simple distance calculation
-        dist = np.sqrt((lat - anchor["lat"])**2 + (lon - anchor["lon"])**2)
-        if dist < 0.0001:  # Very close to anchor
-            return lat, lon
-        
-        weight = 1.0 / (dist + 0.01)  # Inverse distance weighting
-        total_weight += weight
-        corrected_lat += anchor["lat"] * weight
-        corrected_lon += anchor["lon"] * weight
-    
-    # Blend original with anchor-corrected (90% original, 10% correction)
-    blend = 0.9
-    final_lat = lat * blend + (corrected_lat / total_weight) * (1 - blend)
-    final_lon = lon * blend + (corrected_lon / total_weight) * (1 - blend)
-    
-    return final_lat, final_lon
+    """
+    DEPRECATED: This function blends detections toward anchor centroids,
+    which systematically biases results toward the geometric center of the lake.
+
+    The process_tiff_with_coords() function uses proper CRS-aware geotransform
+    via rasterio.warp.transform — no anchor math needed.
+
+    This function is kept as a no-op for backward compatibility.
+    Do NOT use it — it returns coordinates unchanged.
+    """
+    # No-op: return coordinates unchanged
+    return lat, lon
 
 def process_tiff_with_coords(tiff_path: Path, threshold: float = 1.5):
     """
@@ -96,45 +103,44 @@ def process_tiff_with_coords(tiff_path: Path, threshold: float = 1.5):
         crs = src.crs
         
         print(f"    Shape: {data.shape}, CRS: {crs}")
-        
-        # Upload to GPU
-        data_gpu = cp.asarray(data)
-        
-        # Heavy GPU processing
-        mean_gpu = float(cp.mean(data_gpu))
-        std_gpu = float(cp.std(data_gpu))
-        
-        # Multiple passes for GPU load
-        for _ in range(10):
-            zscore_gpu = (data_gpu - mean_gpu) / std_gpu
-            _ = cp.max(zscore_gpu)
-            _ = cp.min(zscore_gpu)
+
+        # Stats on CPU (fast single pass)
+        mean_val = float(np.mean(data))
+        std_val = float(np.std(data))
+
+        if HAS_GPU:
+            # GPU path: upload to M2200, compute z-score on GPU
+            data_gpu = cp.asarray(data)
+            zscore_gpu = (data_gpu - mean_val) / std_val
             cp.cuda.Stream.null.synchronize()
-        
-        # Find anomalies
-        abs_zscore = cp.where(zscore_gpu > 0, zscore_gpu, -zscore_gpu)
-        anomalies_gpu = abs_zscore > threshold
-        anomaly_count = int(cp.sum(anomalies_gpu))
+            anomaly_mask = cp.abs(zscore_gpu) > threshold
+            anomaly_count = int(cp.count_nonzero(anomaly_mask))
+            # Move mask to CPU for index extraction
+            mask_cpu = cp.asnumpy(anomaly_mask)
+            zscores_all = cp.asnumpy(zscore_gpu[mask_cpu])
+        else:
+            # CPU path: pure NumPy
+            zscore = (data - mean_val) / std_val
+            anomaly_mask = np.abs(zscore) > threshold
+            anomaly_count = int(np.count_nonzero(anomaly_mask))
+            mask_cpu = anomaly_mask
+            zscores_all = zscore[mask_cpu]
         
         print(f"    Anomalies: {anomaly_count}")
-        
+
         if anomaly_count == 0:
             return []
-        
-        # Get top 50 anomalies
-        anomaly_indices = cp.where(anomalies_gpu)
-        rows = cp.asnumpy(anomaly_indices[0])
-        cols = cp.asnumpy(anomaly_indices[1])
-        zscores = cp.asnumpy(zscore_gpu[anomalies_gpu])
-        
-        # Sort by Z-score magnitude
-        sorted_idx = np.argsort(np.abs(zscores))[::-1][:50]
+
+        # Get top 50 anomalies — index extraction on CPU
+        rows, cols = np.where(mask_cpu)
+        # Sort by Z-score magnitude on CPU
+        sorted_idx = np.argsort(np.abs(zscores_all))[::-1][:50]
         
         detections = []
         for idx in sorted_idx:
             row = int(rows[idx])
             col = int(cols[idx])
-            zscore = float(zscores[idx])
+            zscore = float(zscores_all[idx])
             
             # PROPER CRS-AWARE COORDINATE EXTRACTION
             # Get real-world coordinates in file's LOCAL system (meters)
@@ -221,9 +227,15 @@ def main():
     print()
     
     # Find ALL TIFFs
+    # Cross-platform data paths — use env var, Syncthing folder, or current dir
+    data_base = Path(os.environ.get('CESAROPS_DATA_DIR', Path(__file__).parent / 'data'))
     search_paths = [
-        Path(r"C:\Users\thomf\programming\Bagrecovery\outputs\rossa_forensic_cache"),
-        Path(r"C:\Users\thomf\programming\Bagrecovery\sentinel_hunt\cache"),
+        data_base / 'rossa_forensic_cache',
+        data_base / 'sentinel_hunt_cache',
+        data_base / 'bagrecovery' / 'outputs' / 'rossa_forensic_cache',
+        data_base / 'bagrecovery' / 'sentinel_hunt' / 'cache',
+        # Fallback: any 'data' or 'outputs' subdirectory in parent dirs
+        Path(__file__).parent.parent / 'cesarops-data' / 'tiffs',
     ]
     
     tiffs = []

@@ -14,6 +14,7 @@ tauri/node_modules/
 tauri/target/
 tauri/dist/
 tauri/src-tauri/target/
+tauri/src-tauri/gen/
 
 # Rust target
 cesarops-slicer/target/
@@ -26,3 +27,10 @@ outputs/
 
 # Syncthing
 .stfolder/
+*.sync-conflict-*
+*.sync-template-*
+
+# Credentials
+cesarops.com.@Juliek01241973
+*Juliek*
+*cesarops.com.@*

@@ -99,22 +99,31 @@ def find_external_hd():
 def get_disk_serial(mount_point):
     """Get disk serial number"""
     platform = get_platform()
-    
+
     try:
         if platform == 'windows':
-            result = subprocess.run(f'vol {mount_point}', shell=True, capture_output=True, text=True)
+            # SECURITY: Use list form to prevent shell injection
+            result = subprocess.run(['vol', mount_point], capture_output=True, text=True)
             for line in result.stdout.split('\n'):
                 if 'Volume Serial Number' in line:
                     return line.split(':')[-1].strip()
-        
+
         elif platform == 'linux':
-            result = subprocess.run(f'lsblk -o SERIAL --noheadings {mount_point}', shell=True, capture_output=True, text=True)
+            # SECURITY: Use list form to prevent shell injection
+            result = subprocess.run(
+                ['lsblk', '-o', 'SERIAL', '--noheadings', mount_point],
+                capture_output=True, text=True
+            )
             serial = result.stdout.strip()
             if serial:
                 return serial
-        
+
         elif platform == 'mac':
-            result = subprocess.run(f'diskutil info {mount_point} | grep "Volume Serial Number"', shell=True, capture_output=True, text=True)
+            # SECURITY: Use list form to prevent shell injection
+            result = subprocess.run(
+                ['diskutil', 'info', mount_point],
+                capture_output=True, text=True
+            )
             for line in result.stdout.split('\n'):
                 if 'Volume Serial Number' in line:
                     return line.split(':')[-1].strip()

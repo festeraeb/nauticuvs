@@ -153,7 +153,6 @@ export interface PdfBreakerRequest {
 }
 
 export type MagPotential = "strong" | "moderate" | "weak" | "unknown";
-export type ActivePanel = "list" | "detail" | "stats" | "scan" | "mag" | "erie" | "restore" | "pdf" | "map" | "export" | "loran" | "sensors";
 
 // ── Lake Erie Scanner types ──────────────────────────────────────────────────
 
@@ -338,8 +337,8 @@ export interface HarvesterResult {
   errors: string[];
 }
 
-// Update ActivePanel to include harvester panel
+// ActivePanel — all top-level panel routes
 export type ActivePanel =
   | "list" | "detail" | "stats" | "scan" | "mag" | "erie"
   | "restore" | "pdf" | "map" | "export" | "loran" | "sensors"
-  | "harvest";
+  | "harvest" | "agent";

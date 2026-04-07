@@ -28,7 +28,7 @@ except ImportError:
 def _load_env(path: Path) -> dict:
     env = {}
     if path.exists():
-        for line in path.read_text().splitlines():
+        for line in path.read_text(encoding='utf-8').splitlines():
             line = line.strip()
             if line and not line.startswith('#') and '=' in line:
                 k, _, v = line.partition('=')
@@ -68,7 +68,14 @@ class SSHNode:
             raise RuntimeError("paramiko not installed — pip install paramiko")
 
         self._client = paramiko.SSHClient()
-        self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+        # SECURITY: Reject unknown hosts to prevent MITM attacks.
+        # Load system host keys from ~/.ssh/known_hosts.
+        self._client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        try:
+            self._client.load_system_host_keys()
+        except FileNotFoundError:
+            pass  # No known_hosts file yet — user must manually accept first connection
 
         if self.key_path and Path(self.key_path).exists():
             self._client.connect(

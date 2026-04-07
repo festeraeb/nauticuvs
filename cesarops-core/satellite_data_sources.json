@@ -1,0 +1,205 @@
+{
+  "satellite_data_sources": {
+    "usgs_earth_explorer": {
+      "name": "USGS Earth Explorer",
+      "description": "Landsat 8/9 archive (2013-present). Thermal (B10/B11), optical (B02-B07).",
+      "url": "https://earthexplorer.usgs.gov/",
+      "api_url": "https://m2m.cr.usgs.gov/api/api/json/stable/",
+      "requires_api_key": true,
+      "env_key": "USGS_API_KEY",
+      "collections": [
+        "LANDSAT_LC09_C02_T1_L2",
+        "LANDSAT_LC08_C02_T1_L2"
+      ],
+      "bands": {
+        "thermal": ["B10", "B11"],
+        "optical": ["B02", "B03", "B04", "B05", "B06", "B07"],
+        "panchromatic": ["B08"]
+      },
+      "resolution": {
+        "thermal": "100m/pixel",
+        "optical": "30m/pixel",
+        "panchromatic": "15m/pixel"
+      },
+      "notes": "Free registration. API key required for programmatic access."
+    },
+
+    "copernicus_dataspace": {
+      "name": "Copernicus Data Space",
+      "description": "Sentinel-1 SAR, Sentinel-2 optical. Primary source for SAR and high-res optical.",
+      "url": "https://dataspace.copernicus.eu/",
+      "api_url": "https://catalogue.dataspace.copernicus.eu/odata/v1/Products",
+      "requires_api_key": true,
+      "env_key": "COPERNICUS_USERNAME",
+      "collections": [
+        "SENTINEL-1",
+        "SENTINEL-2"
+      ],
+      "bands": {
+        "sar": ["VV", "VH"],
+        "optical_10m": ["B02", "B03", "B04", "B08"],
+        "optical_20m": ["B05", "B06", "B07", "B8A", "B11", "B12"],
+        "optical_60m": ["B01", "B09", "B10"]
+      },
+      "resolution": {
+        "sar": "10m/pixel (IW mode)",
+        "optical_10m": "10m/pixel",
+        "optical_20m": "20m/pixel"
+      },
+      "notes": "Free registration. Username/password auth via OData API."
+    },
+
+    "nasa_podaac": {
+      "name": "NASA PO.DAAC (SWOT, ICESat-2)",
+      "description": "SWOT sea surface height, ICESat-2 ATL13 bathymetry. Ka-band radar altimetry.",
+      "url": "https://podaac.jpl.nasa.gov/",
+      "api_url": "https://cmr.earthdata.nasa.gov/search/granules.json",
+      "requires_api_key": true,
+      "env_key": "EARTHDATA_TOKEN",
+      "collections": [
+        "SWOT_L2_LR_SSH_Expert",
+        "ATL13 (ICESat-2)"
+      ],
+      "variables": {
+        "swot": ["ssha", "longitude", "latitude", "quality_flag"],
+        "icesat2_atl13": ["h_ph", "latitude", "longitude", "quality_ph"]
+      },
+      "resolution": {
+        "swot": "~2km along-track, ~10km across-track swath",
+        "icesat2_atl13": "~0.7m footprint, ~60-170m along-track spacing"
+      },
+      "notes": "Free registration. Earthdata token required for downloads."
+    },
+
+    "nasa_hls": {
+      "name": "NASA Harmonized Landsat Sentinel-2 (HLS)",
+      "description": "Combined Landsat-8/9 + Sentinel-2A/B surface reflectance. Seamless 30m optical.",
+      "url": "https://hls.gsfc.nasa.gov/",
+      "api_url": "https://cmr.earthdata.nasa.gov/search/granules.json",
+      "requires_api_key": true,
+      "env_key": "EARTHDATA_TOKEN",
+      "collections": [
+        "HLSL30 (Landsat)",
+        "HLSS30 (Sentinel-2)"
+      ],
+      "bands": {
+        "optical": ["B02", "B03", "B04", "B8A", "B11", "B12"],
+        "thermal": ["ST_B10"],
+        "quality": ["Fmask"]
+      },
+      "resolution": "30m/pixel",
+      "notes": "Harmonized product — no need to process Landsat and Sentinel-2 separately. Earthdata token required."
+    },
+
+    "sentinel_hub": {
+      "name": "Sentinel Hub (EO Browser / Process API)",
+      "description": "Commercial-grade Sentinel processing with on-demand cloud processing.",
+      "url": "https://www.sentinel-hub.com/",
+      "api_url": "https://services.sentinel-hub.com/",
+      "requires_api_key": true,
+      "env_key": "SENTINEL_HUB_CLIENT_ID",
+      "features": [
+        "On-the-fly NDVI, NDWI, true color",
+        "Custom evalscripts for wreck detection",
+        "Cloud coverage filtering"
+      ],
+      "notes": "Free tier: 1000 processing units/month. Paid plans available."
+    },
+
+    "noaa_class": {
+      "name": "NOAA Comprehensive Large Array-data Stewardship System (CLASS)",
+      "description": "NOAA satellite data including GOERS, JPSS. Useful for thermal and atmospheric data.",
+      "url": "https://www.class.noaa.gov/",
+      "requires_api_key": true,
+      "env_key": "NOAA_CLASS_TOKEN",
+      "notes": "Free registration. Less commonly used for wreck detection but useful for atmospheric corrections."
+    },
+
+    "asf_hyp3": {
+      "name": "ASF HyP3 (Hybrid Pluggable Processing Pipeline)",
+      "description": "NASA Alaska Satellite Facility's cloud processing for SAR. Submit Sentinel-1 granules for on-demand RTC, InSAR, and autorift processing. Free — uses Earthdata auth.",
+      "url": "https://hyp3-docs.asf.alaska.edu/",
+      "api_url": "https://hyp3-api.asf.alaska.edu/",
+      "ui_url": "https://hyp3-api.asf.alaska.edu/ui/",
+      "requires_api_key": true,
+      "env_key": "EARTHDATA_TOKEN",
+      "auth_method": "NASA Earthdata (same token as PO.DAAC)",
+      "processing_types": [
+        {
+          "name": "RTC",
+          "description": "Radiometric Terrain Corrected — calibrated backscatter (Gamma0). Best for wreck detection.",
+          "parameters": {
+            "name": "string — job label",
+            "granules": ["S1A_IW_SLC__...", "S1B_IW_SLC__..."],
+            "job_type": "RTC_GAMMA",
+            "job_parameters": {
+              "dem_name": "REMA | ArcticDEM | GLO30 | GLO90 | COP30",
+              "scale": "POWER | DECIBEL",
+              "polarizations": ["VV", "VH", "VV+VH"],
+              "radiometry": "GAMMA0",
+              "resolution": 30
+            }
+          }
+        },
+        {
+          "name": "InSAR",
+          "description": "Interferometric SAR — phase difference between two passes. Detects surface deformation.",
+          "parameters": {
+            "job_type": "INSAR_GAMMA",
+            "granules": ["reference_granule", "secondary_granule"],
+            "job_parameters": {
+              "dem_name": "REMA | ArcticDEM | GLO30",
+              "looks": "20x4 | 10x2",
+              "polarization": "VV | VH"
+            }
+          }
+        },
+        {
+          "name": "Autorift",
+          "description": "AutoRIFT — feature tracking for surface velocity / displacement fields.",
+          "parameters": {
+            "job_type": "AUTORIFT",
+            "granules": ["reference_granule", "secondary_granule"]
+          }
+        }
+      ],
+      "api_endpoints": {
+        "submit_job": "POST https://hyp3-api.asf.alaska.edu/jobs",
+        "list_jobs": "GET https://hyp3-api.asf.alaska.edu/jobs",
+        "get_job": "GET https://hyp3-api.asf.alaska.edu/jobs/{job_id}",
+        "download_product": "GET https://hyp3-api.asf.alaska.edu/jobs/{job_id}/product",
+        "search_granules": "GET https://hyp3-api.asf.alaska.edu/granules"
+      },
+      "rate_limits": {
+        "concurrent_jobs": 1,
+        "max_granules_per_job": 2,
+        "queue_wait": "Varies — typically 1-6 hours for RTC, longer for InSAR"
+      },
+      "best_for": [
+        "Pre-processed SAR without local GPU",
+        "RTC Gamma0 backscatter for submerged steel detection",
+        "InSAR coherence for hull mass verification",
+        "Free cloud processing — no local SNAP installation needed"
+      ],
+      "notes": "Uses same NASA Earthdata credentials as PO.DAAC. Free tier: 1 job at a time. Products delivered as GeoTIFF + metadata to S3 download link. Ideal for Straits of Mackinac where cloud cover ruins optical — SAR works in all weather."
+    }
+  },
+
+  "data_acquisition_guidelines": {
+    "straits_of_mackinac": {
+      "bbox": [45.80, -84.80, 46.10, -84.40],
+      "best_months": ["June", "July", "August", "September", "October"],
+      "avoid_months": ["November", "December", "January", "February", "March", "April"],
+      "reason": "Ice cover typically melts off by late May. Best data is post-ice-melt through fall freeze-up.",
+      "recommended_sensors": ["Sentinel-1 SAR (year-round, penetrates clouds)", "Landsat-8/9 thermal (clear days)", "Sentinel-2 optical (clear days)", "SWOT (overpass dates)"],
+      "cloud_cover_threshold": "Less than 20% cloud coverage for optical"
+    }
+  },
+
+  "download_scripts": {
+    "usgs_downloader": "scripts/download_usgs_landsat.py",
+    "copernicus_downloader": "scripts/download_copernicus_sentinel.py",
+    "podaac_downloader": "scripts/download_nasa_swot.py",
+    "hls_downloader": "scripts/download_nasa_hls.py"
+  }
+}
