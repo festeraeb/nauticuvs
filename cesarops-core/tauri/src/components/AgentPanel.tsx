@@ -98,6 +98,40 @@ export default function AgentPanel() {
     setRunning(false);
   };
 
+  const handleSmartDownload = async () => {
+    setRunning(true);
+    setOutput("🔍 Querying NASA Catalog via Rust SDK...");
+    try {
+      // 1. Ask Rust to find data
+      const manifest: any = await invoke("search_nasa_granules", {
+        bbox: [44.5, -92.0, 47.0, -80.0],
+        startDate: "2024-06-01",
+        endDate: "2024-10-30",
+        sensor: "hls,sar"
+      });
+
+      const count = manifest.granules?.length || 0;
+      setOutput(`✅ Found ${count} granules! Starting Swarm Download...`);
+      addTask(`NASA Search`, `Found ${count} granules. Starting download swarm...`, '', 'running');
+
+      // 2. Trigger the Python Swarm
+      const res: any = await invoke("run_task", {
+        taskId: `dl-rust-${Date.now()}`,
+        script: "batch_download_manager.py",
+        args: ['--lakes', 'all', '--start', '2013', '--end', '2025'],
+        workDir: workDir || '../'
+      });
+      
+      setOutput(res.stdout || "");
+      if (res.stderr) setOutput((prev) => prev + "\n\n--- stderr ---\n" + res.stderr);
+      addTask("Swarm Download (2013-2025)", (res.stdout || "").slice(-200), (res.stderr || "").slice(-200), res.status);
+    } catch (e: any) {
+      setOutput(`❌ Error: ${e}`);
+      addTask("Smart Download", "", String(e), "error");
+    }
+    setRunning(false);
+  };
+
   return (
     <div className="agent-panel" style={{ padding: 16, height: "100%", display: "flex", flexDirection: "column", gap: 12 }}>
       <h2 style={{ margin: 0 }}>🤖 AI Director</h2>

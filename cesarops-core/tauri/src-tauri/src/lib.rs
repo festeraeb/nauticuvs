@@ -7,6 +7,8 @@
 //!
 //! The backend is a thin wrapper: spawns Python → captures stdout → sends to React frontend.
 
+mod nasa_agent;
+
 use std::path::PathBuf;
 use std::process::Command;
 use tauri::Emitter;
@@ -176,6 +178,7 @@ async fn run_task(
 
     let mut cmd = Command::new(python);
     cmd.current_dir(&work_dir);
+    cmd.env("PYTHONIOENCODING", "utf-8");  // Force UTF-8 output
     cmd.arg(&script);
     cmd.args(&args);
     cmd.stdout(std::process::Stdio::piped());
@@ -322,6 +325,8 @@ pub fn run() {
             run_background_probe,
             check_nodes,
             list_wrecks,
+            nasa_agent::search_nasa_granules,
+            nasa_agent::trigger_swarm_download,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -15,6 +15,15 @@ Usage:
     python ai_director.py --interpret outputs/probes/*.json
 """
 
+# Fix Windows console encoding (prevents UnicodeEncodeError on cp1252)
+import sys, io
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 import argparse
 import json
 import os
@@ -252,6 +261,7 @@ Preset bounding boxes:
 """
 
 def _build_system_prompt() -> str:
+    from llm_context_injector import build_knowledge_context, build_satellite_context
     prompt = SYSTEM_PROMPT
     for name, bbox in BOUNDING_BOXES.items():
         prompt += (
@@ -266,12 +276,19 @@ def _build_system_prompt() -> str:
             f"  {tid}: {tinfo['description']} "
             f"(best for: {', '.join(tinfo['best_for'])})\n"
         )
+    # Inject knowledge base context
+    prompt += "\n" + build_knowledge_context() + "\n"
+    prompt += "\n" + build_satellite_context() + "\n"
     prompt += (
         "\nRules:\n"
         "- If the user mentions a known wreck name, pick the matching bbox.\n"
         "- If unclear, default to 'lake_michigan_south'.\n"
         "- Always include at least one tool.\n"
         "- Use sensitivity 2.0 unless the user says 'aggressive' (1.0) or 'conservative/strict' (3.0).\n"
+        "- Use web search to check weather/cloud cover AND wind history for the scan area. "
+        "Best scanning is 12-48 hours AFTER a storm with 20-40mph winds — silt plumes "
+        "settle over wrecks creating visible signatures. Note wind history and conditions. "
+        "SAR works in all weather.\n"
         "- Respond with ONLY valid JSON. No markdown. No extra text.\n"
     )
     return prompt
@@ -295,7 +312,7 @@ def call_qwen(messages: List[Dict]) -> str:
         "temperature": 0.3,
     }
 
-    resp = requests.post(url, headers=headers, json=body, timeout=30)
+    resp = requests.post(url, headers=headers, json=body, timeout=120)
     resp.raise_for_status()
     data = resp.json()
     return data["choices"][0]["message"]["content"]
@@ -461,16 +478,30 @@ class AIDirector:
     def run_tool(self, tool_name: str) -> Dict:
         tool = AVAILABLE_TOOLS[tool_name]
         script_path = Path(__file__).parent / tool['script']
+        sensor_threshold = tool.get('default_threshold', 2.0)
 
         if not script_path.exists():
             return {'tool': tool_name, 'success': False,
                     'error': f'Script not found: {script_path}'}
 
-        cmd = [sys.executable, str(script_path)]
+        # Build per-sensor output dir
+        out_dir = Path(__file__).parent / 'outputs' / 'probes' / tool_name
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        cmd = [sys.executable, str(script_path), '--sensor', tool_name,
+               '--zscore', str(sensor_threshold),
+               '--output', str(out_dir)]
+
+        # Pass .env variables to subprocess so scan scripts can find data
+        import copy as _copy
+        child_env = _copy.copy(dict(os.environ))
+        for k, v in _dotenv.items():
+            child_env[k] = v
 
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=600,
+                env=child_env,
             )
             return {
                 'tool': tool_name,
@@ -542,8 +573,10 @@ def main():
     parser.add_argument('--tools', type=str, help='Comma-separated tool list')
     parser.add_argument('--sensitivity', type=float, default=2.0, help='1.0=aggressive, 3.0=conservative')
     parser.add_argument('--list-tools', '-l', action='store_true')
+    parser.add_argument('--plan', action='store_true', help='Step 1: Generate a plan (JSON) without running.')
+    parser.add_argument('--execute-plan', action='store_true', help='Step 2: Execute a saved plan (No LLM timeout).')
     parser.add_argument('--execute', '-x', action='store_true')
-    parser.add_argument('--interpret', '-i', type=str, nargs='*', help='Interpret existing result JSON files')
+    parser.add_argument('--interpret', '-i', type=str, nargs='*', help='Step 3: Interpret existing results.')
     parser.add_argument('--no-llm', action='store_true', help='Disable Qwen, use keyword matching')
     parser.add_argument('--output', '-o', type=str, help='Save results to JSON')
     parser.add_argument('--setup-keys', action='store_true', help='Interactively configure API keys')
@@ -589,7 +622,7 @@ def main():
         for fp in args.interpret:
             p = Path(fp)
             if p.exists():
-                results_data.append(json.loads(p.read_text()))
+                results_data.append(json.loads(p.read_text(encoding='utf-8')))
             else:
                 print(f"  ⚠ Not found: {fp}")
 
@@ -620,6 +653,57 @@ def main():
             print(f"    {t['description']}")
             print(f"    Best for: {', '.join(t['best_for'])}")
         print(f"\n{'='*100}")
+        return
+
+    # ── PLAN MODE (LLM takes its time to think) ────────────────────────────
+    if args.plan and args.request:
+        print(f"\nRequest: {args.request}")
+        director = AIDirector(use_llm=not args.no_llm)
+        plan = director.parse_request(args.request)
+        
+        plan_path = Path(__file__).parent / "outputs" / "current_plan.json"
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        plan_path.write_text(json.dumps(plan, indent=2), encoding='utf-8')
+        
+        print(f"\n✅ PLAN SAVED to: {plan_path}")
+        print(json.dumps(plan, indent=2))
+        return
+
+    # ── EXECUTE PLAN MODE (No LLM involved, just pure execution) ───────────
+    if args.execute_plan:
+        plan_path = Path(__file__).parent / "outputs" / "current_plan.json"
+        if not plan_path.exists():
+            print(f"❌ No plan found at {plan_path}. Run --plan first.")
+            return
+        
+        plan = json.loads(plan_path.read_text(encoding='utf-8'))
+        print(f"\n🚀 EXECUTING PLAN...")
+        
+        director = AIDirector(use_llm=False)
+        
+        # Set up the director from the plan
+        if plan.get('bbox_name'):
+            director.set_bounding_box(plan['bbox_name'])
+        elif plan.get('bbox'):
+            b = plan['bbox']
+            director.set_bounding_box(lat_min=b[0], lon_min=b[1], lat_max=b[2], lon_max=b[3])
+        
+        director.set_tools(plan.get('tools', []))
+        director.set_parameters(sensitivity=plan.get('sensitivity', 2.0))
+        
+        # Run it
+        results = director.execute()
+        
+        # Save results
+        out_path = Path(__file__).parent / "outputs" / "probes" / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps({
+            'timestamp': datetime.now().isoformat(),
+            'plan': plan,
+            'results': results,
+            'summary': director.summarize(),
+        }, indent=2), encoding='utf-8')
+        print(f"\n✅ RESULTS SAVED to: {out_path}")
         return
 
     # ── Run ────────────────────────────────────────────────────────────────
@@ -659,6 +743,54 @@ def main():
     if args.execute or args.request:
         results = director.execute()
 
+        # ── Triple Lock Fusion ────────────────────────────────────────
+        fusion_path = Path(__file__).parent / 'triple_lock_fusion.py'
+        if fusion_path.exists() and len(results) >= 2:
+            print(f"\n{'='*70}")
+            print("TRIPLE LOCK FUSION")
+            print(f"{'='*70}")
+            # Find per-sensor output files
+            sensor_files = {}
+            probes_dir = Path(__file__).parent / 'outputs' / 'probes'
+            for sensor in ['thermal', 'optical', 'sar']:
+                sensor_dir = probes_dir / sensor
+                if sensor_dir.exists():
+                    jsons = sorted(sensor_dir.glob('*.json'))
+                    if jsons:
+                        sensor_files[sensor] = jsons[-1]
+
+            if len(sensor_files) >= 2:
+                fusion_cmd = [sys.executable, str(fusion_path)]
+                for sensor, fpath in sensor_files.items():
+                    fusion_cmd += [f'--{sensor}', str(fpath)]
+                fusion_out = Path(__file__).parent / 'outputs' / 'probes' / 'latest_fusion.json'
+                fusion_cmd += ['--radius', '1000', '--output', str(fusion_out)]
+
+                try:
+                    fusion_result = subprocess.run(
+                        fusion_cmd, capture_output=True, text=True,
+                        env=child_env, timeout=60
+                    )
+                    if fusion_result.returncode == 0:
+                        print(fusion_result.stdout)
+                        # Load and show fusion results
+                        if fusion_out.exists():
+                            fusion_data = json.loads(fusion_out.read_text(encoding='utf-8'))
+                            clusters = fusion_data.get('clusters', [])
+                            if clusters:
+                                print(f"\n  Targets found: {len(clusters)}")
+                                for i, c in enumerate(clusters[:10], 1):
+                                    print(f"    [{i}] {c['lock_type']} | "
+                                          f"lat={c['lat']:.4f} lon={c['lon']:.4f} | "
+                                          f"z={c['max_zscore']:.1f} | "
+                                          f"sensors={', '.join(c['sensors'])}")
+                            else:
+                                print("\n  No multi-sensor lock targets found.")
+                    else:
+                        print(f"  Fusion stderr: {fusion_result.stderr[:200]}")
+                except Exception as e:
+                    print(f"  Fusion failed: {e}")
+
         # Interpretation
         print(f"\n{'='*70}")
         print("QWEN INTERPRETATION")
@@ -676,7 +808,7 @@ def main():
                 'results': results,
                 'summary': director.summarize(),
                 'interpretation': briefing,
-            }, indent=2))
+            }, indent=2), encoding='utf-8')
             print(f"\n✓ Saved: {out}")
 
 
