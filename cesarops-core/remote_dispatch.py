@@ -196,6 +196,50 @@ def build_xenon_tpu_health() -> str:
     )
 
 
+def build_xenon_tpu_start() -> str:
+    """Start TPU server on Xenon in background, searching likely locations for tpu_server.py."""
+    # Search order: repo sync dir, common install paths
+    search_paths = [
+        f"{XENON_WORK}",
+        f"{XENON_WORK}/../cesarops-core",
+        "/home/cesarops/cesarops-core",
+        "/home/cesarops/cesarops/cesarops-core",
+        "/opt/cesarops",
+    ]
+    find_cmd = " || ".join(
+        f"[ -f {p}/tpu_server.py ] && echo {p}" for p in search_paths
+    )
+    return (
+        f"TPU_DIR=$( {find_cmd} | head -1 ) && "
+        f"if [ -z \"$TPU_DIR\" ]; then "
+        f"  echo '{{\"status\": \"tpu_server_not_found\"}}'; exit 0; "
+        f"fi && "
+        f"if ! curl -s http://localhost:5001/health > /dev/null 2>&1; then "
+        f"  cd $TPU_DIR && "
+        f"  nohup python tpu_server.py --port 5001 > /tmp/tpu_server.log 2>&1 & "
+        f"  sleep 5; "
+        f"fi && "
+        f"curl -s http://localhost:5001/health 2>/dev/null || echo '{{\"status\": \"start_failed\"}}'"
+    )
+
+
+def build_data_inventory(lakes: list = None, data_root: str = None) -> str:
+    """Build shell command to inventory downloaded data on Pi."""
+    root = data_root or f"{PI_WORK}/downloads"
+    lake_list = " ".join(lakes) if lakes else "michigan superior huron erie ontario"
+    return (
+        f"python3 -c \""
+        f"import json, os; "
+        f"root = '{root}'; "
+        f"inv = {{}}; "
+        f"for lake in '{lake_list}'.split(): "
+        f"  d = os.path.join(root, lake); "
+        f"  inv[lake] = {{'exists': os.path.isdir(d), 'files': len(os.listdir(d)) if os.path.isdir(d) else 0}}; "
+        f"print(json.dumps(inv))"
+        f"\""
+    )
+
+
 # ── High-level dispatcher ────────────────────────────────────────────────────
 
 class TaskDispatcher:
@@ -207,30 +251,51 @@ class TaskDispatcher:
         self.task_log = []
 
     def status(self) -> dict:
-        """Ping all nodes, return connectivity status."""
+        """Ping all nodes, return connectivity status including TPU state and data inventory."""
         result = {"timestamp": datetime.now(timezone.utc).isoformat(), "nodes": {}}
 
         if self.pi:
+            pi_online = self.pi.ping()
             result["nodes"]["pi"] = {
                 "host": PI_HOST,
-                "online": self.pi.ping(),
+                "online": pi_online,
                 "work_dir": PI_WORK,
             }
+            # Data inventory on Pi
+            if pi_online:
+                try:
+                    inv_result = self.pi.run(build_data_inventory(), timeout=15)
+                    if inv_result["exit_code"] == 0 and inv_result["stdout"].strip():
+                        result["nodes"]["pi"]["data_inventory"] = json.loads(inv_result["stdout"].strip())
+                except Exception:
+                    result["nodes"]["pi"]["data_inventory"] = {"error": "inventory_failed"}
         else:
             result["nodes"]["pi"] = {"host": PI_HOST, "online": False, "reason": "no credentials"}
 
         if self.xenon:
+            xenon_online = self.xenon.ping()
             result["nodes"]["xenon"] = {
                 "host": XENON_HOST,
-                "online": self.xenon.ping(),
+                "online": xenon_online,
                 "work_dir": XENON_WORK,
             }
-            # Also check TPU
-            try:
-                tpu_result = self.xenon.run(build_xenon_tpu_health(), timeout=10)
-                result["nodes"]["xenon"]["tpu"] = json.loads(tpu_result["stdout"]) if tpu_result["exit_code"] == 0 else {"status": "error"}
-            except Exception:
-                result["nodes"]["xenon"]["tpu"] = {"status": "unreachable"}
+            if xenon_online:
+                # Check TPU — auto-start if unreachable
+                try:
+                    tpu_result = self.xenon.run(build_xenon_tpu_health(), timeout=10)
+                    raw = tpu_result["stdout"].strip() if tpu_result["exit_code"] == 0 else ""
+                    tpu_info = json.loads(raw) if raw else {"status": "error"}
+                    if tpu_info.get("status") in ("unreachable", "error", "start_failed", None):
+                        # Auto-start tpu_server.py
+                        start_result = self.xenon.run(build_xenon_tpu_start(), timeout=20)
+                        raw2 = start_result["stdout"].strip()
+                        tpu_info = json.loads(raw2) if raw2 else {"status": "start_failed"}
+                        tpu_info["auto_started"] = True
+                    result["nodes"]["xenon"]["tpu"] = tpu_info
+                except Exception as e:
+                    result["nodes"]["xenon"]["tpu"] = {"status": "unreachable", "error": str(e)}
+            else:
+                result["nodes"]["xenon"]["tpu"] = {"status": "node_offline"}
         else:
             result["nodes"]["xenon"] = {"host": XENON_HOST, "online": False, "reason": "no credentials"}
 

@@ -16,15 +16,16 @@ use serde_json::Value;
 /// println!("Resolution: {}", meta.resolution);
 /// ```
 pub async fn fetch_sensor_metadata(short_name: &str) -> Result<SensorMeta, Box<dyn std::error::Error>> {
+    // Use granules.umm_json so the response uses the UMM "items" schema
+    // (granules.json returns feed.entry format and ignores the UMM Accept header)
     let url = format!(
-        "https://cmr.earthdata.nasa.gov/search/granules.json?short_name={}",
+        "https://cmr.earthdata.nasa.gov/search/granules.umm_json?short_name={}",
         short_name
     );
 
     let client = reqwest::Client::new();
     let res = client
         .get(&url)
-        .header("Accept", "application/vnd.nasa.cmr.umm_results+json")
         .send()
         .await?
         .json::<Value>()
@@ -66,7 +67,7 @@ pub async fn update_sensor_metadata(short_name: &str) -> Result<(), Box<dyn std:
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::fetch_sensor_metadata;
 
     #[tokio::test]
     #[ignore] // requires network

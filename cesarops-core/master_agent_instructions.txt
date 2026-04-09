@@ -1,0 +1,56 @@
+🤖 CESAROPS MASTER AGENT INSTRUCTIONS
+
+You are the CESAROPS Xenon Agent. You have access to the full hardware stack and sensor logic.
+Your job is to fix the data pipeline, run the scans, and get real satellite data.
+
+## 🏗️ HARDWARE & PATHS
+- This Machine: Xenon (Ubuntu Linux)
+- IP: 10.0.0.40 | User: cesarops
+- GPU: Quadro P1000 (4GB VRAM). CUDA 12.0. CuPy 14.0.1.
+- Work Dir: /home/cesarops/cesarops/cesarops-core
+- VENV: source ~/cesarops/venv/bin/activate
+- Data Dir: /data/cesarops/Sync/real_data (1TB external drive)
+- Pi Conductor: 10.0.0.226 (downloads data, syncs to Xenon)
+
+## 🛰️ SENSOR TRUTH
+1. Optical: Use HLS S30 (GeoTIFF). It includes Band B02 (Blue) for water penetration.
+   - Target: Blue Band anomalies (submerged wrecks), NOT NIR glint (surface boats).
+   - B02 (458-523nm) penetrates water to ~15-25m depth.
+   - B08 (NIR) does NOT penetrate water - only sees surface boats.
+2. SAR: Uses ASF HyP3 RTC_Gamma0 (GeoTIFF, dB scale).
+   - Physics: Water is black (low dB). Wrecks are bright white (corner reflector).
+   - Threshold: Coherence > 0.6, VV/VH ratio > 1.2.
+   - Descending passes (~23:30 UTC) are best - afternoon wind creates capillary waves.
+3. Thermal: Landsat B10/B11.
+   - Physics: Submerged steel = Cold-Sink (retains cold).
+   - Threshold: z >= 2.5.
+
+## 🎯 KNOWN TARGETS
+- Lumberman: 42.8476, -87.82946, 50ft depth. NIR glint (z=11.34) = surface boat on Sep 16 2025.
+- Straits of Mackinac: 45.78 to 46.10, -84.80 to -84.60
+- Andaste: 42.95, -86.45, 450ft depth, steel freighter
+- Gilcher: 45.90, -84.50, 220ft depth, wooden freighter
+
+## 🚫 CRITICAL "DON'Ts"
+- NO "Papua New Guinea" hits. If bbox is Great Lakes (44-47N, 92-80W), ignore equatorial results.
+- NO Raw .jp2 files. Convert to HLS GeoTIFF first.
+- NO Anchor Math. Use rasterio.warp.transform for coordinates.
+- NO sys.exit(1) in scripts. Use exceptions.
+
+## 📋 TASKS TO EXECUTE
+1. Check what SAR data we have on the 1TB drive at /data/cesarops/Sync/real_data/
+2. Check if B02 Blue band files exist for the Lumberman area
+3. Run scan: python3 ai_director.py --bbox 42.5,-88.0,46.5,-83.5 --tools thermal,optical,sar --sensitivity 1.0 --execute --no-llm
+4. Report: Did we get submerged wreck detections or just surface boats?
+
+## 📊 CURRENT STATUS
+- Pi is downloading HLS+SAR data via `universal_downloader.py`
+- 30 SAR granules available from ASF (May-Sep 2025)
+- 33 HyP3 RTC jobs succeeded (16 unique dates)
+- HLS B10/B11 thermal: 23 files on disk
+- B02 Blue: 3 files downloaded so far
+- SAR covers: Jul 24 to Sep 29, 2025 (S1A + S1C, ~23:30 UTC)
+
+## 🔑 KEY INSIGHT
+NIR (B08) only sees surface boats. B02 Blue penetrates water to see submerged wrecks.
+The Lumberman at 50ft needs B02 Blue - we only have B08 NIR right now which detected the boat on top.

@@ -9,43 +9,69 @@ pub struct SwarmRequest {
     pub sensors: String,
 }
 
-/// Command to search NASA Catalog via Rust SDK
+/// Query NASA CMR for real granules via cmr_search.py.
+/// bbox = [lat_min, lon_min, lat_max, lon_max]
 #[tauri::command]
 pub async fn search_nasa_granules(
+    work_dir: String,
     bbox: Vec<f64>,
     start_date: String,
     end_date: String,
     sensor: String,
 ) -> Result<serde_json::Value, String> {
-    // TODO: Integrate nasa-rs SDK here for live CMR/HyP3 queries.
-    // For now, we return a mock manifest to unblock the UI.
-    let mock_granules = vec![
-        serde_json::json!({"id": "HLS.S30.T16TDN.20240601", "sensor": "HLS", "cloud_cover": 5}),
-        serde_json::json!({"id": "S1A_IW_SLC__1SDV.20240601", "sensor": "SAR", "polarization": "VV+VH"}),
-    ];
-    Ok(serde_json::json!({ "granules": mock_granules, "count": mock_granules.len() }))
+    let python = if cfg!(windows) { "python" } else { "python3" };
+    let cwd = if work_dir.is_empty() {
+        std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".into())
+    } else {
+        work_dir.clone()
+    };
+
+    let bbox_str = bbox
+        .iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let output = Command::new(python)
+        .current_dir(PathBuf::from(&cwd))
+        .arg("cmr_search.py")
+        .arg("--bbox").arg(&bbox_str)
+        .arg("--start").arg(&start_date)
+        .arg("--end").arg(&end_date)
+        .arg("--sensor").arg(&sensor)
+        .arg("--max-results").arg("50")
+        .output()
+        .map_err(|e| format!("Failed to launch cmr_search.py: {}", e))?;
+
+    if output.status.success() {
+        let raw = String::from_utf8_lossy(&output.stdout);
+        serde_json::from_str::<serde_json::Value>(&raw)
+            .map_err(|e| format!("Failed to parse CMR JSON: {} — raw: {}", e, &raw[..raw.len().min(200)]))
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("cmr_search.py error: {}", &stderr[..stderr.len().min(400)]))
+    }
 }
 
-/// Command to trigger the Python Swarm with a specific task
+/// Trigger a Python swarm download for a single lake/year (streaming via run_task).
+/// For multi-lake multi-year downloads, use run_task directly with batch_download_manager.py.
 #[tauri::command]
 pub async fn trigger_swarm_download(
     work_dir: String,
     request: SwarmRequest,
 ) -> Result<String, String> {
     let python = if cfg!(windows) { "python" } else { "python3" };
-    let script = "batch_download_manager.py";
-    
+    let cwd = if work_dir.is_empty() { ".".to_string() } else { work_dir };
+
     let output = Command::new(python)
-        .current_dir(PathBuf::from(work_dir))
-        .arg(script)
-        .arg("--lakes")
-        .arg(&request.lake)
-        .arg("--start")
-        .arg(request.year.to_string())
-        .arg("--end")
-        .arg(request.year.to_string())
-        .arg("--sensors")
-        .arg(&request.sensors)
+        .current_dir(PathBuf::from(cwd))
+        .arg("batch_download_manager.py")
+        .arg("--lakes").arg(&request.lake)
+        .arg("--start").arg(request.year.to_string())
+        .arg("--end").arg(request.year.to_string())
+        .arg("--sensors").arg(&request.sensors)
         .output()
         .map_err(|e| format!("Failed to start download: {}", e))?;
 

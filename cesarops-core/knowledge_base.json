@@ -1,0 +1,458 @@
+{
+  "version": "2026-04-07",
+  "last_updated": "2026-04-07T19:16:00Z",
+  "known_targets": {
+    "notes": "Confirmed and suspected wreck locations. Use these as scan anchors.",
+    "entries": [
+      {
+        "id": "michigan_city_cluster",
+        "name": "Michigan City, IN \u2014 Cluster",
+        "lat": 42.36,
+        "lon": -86.9,
+        "confidence": "medium",
+        "sensors_agreeing": [
+          "optical",
+          "thermal"
+        ],
+        "lock_type": "2-lock",
+        "detection_count": 360,
+        "first_seen": "2026-04-07",
+        "notes": "Highest detection count in baseline scan. Optical+thermal agreement. Near Michigan City harbor \u2014 plausible wreck zone."
+      },
+      {
+        "id": "racine_kenosha",
+        "name": "Racine/Kenosha, WI",
+        "lat": 42.74,
+        "lon": -88.09,
+        "confidence": "low",
+        "sensors_agreeing": [
+          "optical",
+          "thermal"
+        ],
+        "lock_type": "2-lock",
+        "detection_count": 51,
+        "first_seen": "2026-04-07",
+        "notes": "Moderate detection count. Worth re-scanning with tighter bbox."
+      },
+      {
+        "id": "andaste",
+        "name": "Andaste / Monster Candidate",
+        "lat": 42.95,
+        "lon": -86.45,
+        "confidence": "high",
+        "sensors_agreeing": [],
+        "lock_type": "not_scanned",
+        "detection_count": 0,
+        "first_seen": "2026-04-07",
+        "notes": "330ft steel freighter candidate. Deep water (450ft). Thermal spine-lock candidate. Not yet scanned with current pipeline."
+      },
+      {
+        "id": "gilcher",
+        "name": "Gilcher (Fox Islands)",
+        "lat": 45.9,
+        "lon": -84.5,
+        "confidence": "medium",
+        "sensors_agreeing": [],
+        "lock_type": "not_scanned",
+        "detection_count": 0,
+        "first_seen": "2026-04-07",
+        "notes": "Known wreck near Fox Islands. Wooden freighter, 220ft. Good for thermal baseline testing."
+      },
+      {
+        "id": "parnell",
+        "name": "Parnell (Beaver Islands)",
+        "lat": 45.7,
+        "lon": -85.5,
+        "confidence": "high",
+        "sensors_agreeing": [],
+        "lock_type": "not_scanned",
+        "detection_count": 0,
+        "first_seen": "2026-04-07",
+        "notes": "Well-documented wreck. Excellent for triple-lock calibration. Depth 180ft."
+      },
+      {
+        "id": "lumberman",
+        "name": "Lumberman (50ft depth, confirmed dive site)",
+        "lat": 42.8476,
+        "lon": -87.82946,
+        "depth_ft": 50,
+        "confidence": "high",
+        "sensors_agreeing": [
+          "optical (NIR glint only)"
+        ],
+        "lock_type": "surface_boat_detected",
+        "detection_count": 2,
+        "first_seen": "2025-09-16",
+        "notes": "Known dive site at 50ft (15m). Surface boat detected via B08 NIR (z=11.34) Sep 16 2025 - B08 does NOT penetrate water. Need B02 Blue (458-523nm) for water penetration to 15-25m depth. Use Stumpf ratio: Depth = m1 * ln(n * R_blue) / ln(n * R_green) + m0",
+        "type": "steel_hull"
+      }
+    ]
+  },
+  "scan_lessons": {
+    "notes": "What we've learned from running scans. Parameter tweaks that worked or failed.",
+    "entries": [
+      {
+        "date": "2026-04-07",
+        "scan_type": "baseline_triple_lock",
+        "bbox": "44.5,-92.0,47.0,-80.0",
+        "what_worked": [
+          "Per-sensor band filtering eliminates cross-contamination between thermal/optical/SAR",
+          "2-lock (2 of 3 sensors) is practical threshold \u2014 3-lock too strict for current data",
+          "AWS public S3 buckets (sentinel-s1-rtc-indigo, sentinel-s2-l2a, usgs-landsat) are reliable data sources",
+          "KoboldCPP via Cloudflare tunnel works as LLM backend \u2014 no cloud API dependency",
+          "Landsat 8/9 thermal B10/B11 from AWS works for anomaly detection",
+          "SAR RTC GeoTIFFs from AWS process correctly on Xenon GPU"
+        ],
+        "what_failed": [
+          "SWOT sensor \u2014 no data available for Great Lakes region",
+          "Wide bbox (entire Lakes MI/Huron) produces too many false positives",
+          "All 3 sensors running same script without band filtering = identical results (fixed)",
+          "Syncthing not configured \u2014 data transfer Pi\u2194Xenon manual",
+          "HyP3 job submission failed on payload format (fixed: needs 'jobs' array)",
+          "Earthdata auth failed with 'cesarops.com.@' username \u2014 correct is 'cesarops.com' with password '@Juliek01241973'"
+        ],
+        "parameter_recommendations": {
+          "thermal_zscore": 2.5,
+          "optical_zscore": 2.0,
+          "sar_zscore": 2.0,
+          "fusion_radius_m": 1000,
+          "note": "SAR has very high anomaly counts (1M+) \u2014 may need higher z-score or different threshold. Optical B01 (aerosol) produces noise \u2014 consider excluding."
+        }
+      },
+      {
+        "date": "2026-04-07",
+        "scan_type": "stress_test_lake_erie",
+        "bbox": "full_lake_michigan",
+        "what_worked": [
+          "Full pipeline: thermal (1050) + optical (1050) + SAR (1100) all processed without crash",
+          "Fusion found same 4 targets as baseline \u2014 reproducible results",
+          "Knowledge base injection working",
+          "KoboldCPP LLM interpretation via Cloudflare tunnel"
+        ],
+        "what_failed": [
+          "SAR GeoTIFFs from AWS bucket are Gulf of Mexico data, not Great Lakes \u2014 all 1100 SAR detections at lat~29 lon~-89",
+          "No real SAR data for Great Lakes available yet",
+          "Optical has coordinate outliers (one detection in Papua New Guinea) \u2014 some JP2/Fmask files have bad geotransforms",
+          "No 3-lock possible without real SAR data"
+        ],
+        "parameter_recommendations": {
+          "note": "Focus on optical+thermal (2-lock) until real SAR data obtained. Silt plume detection via optical is best path forward."
+        }
+      },
+      {
+        "date": "2026-04-07",
+        "scan_type": "B02_Blue_glint_check",
+        "what_worked": [
+          "B02 Blue (458-523nm) downloaded for 3 tiles (TER, TFR, TFS)",
+          "Data quality good - 80-100% valid pixels"
+        ],
+        "what_failed": [
+          "0 anomalies at z>=5 across all 3 B02 tiles",
+          "Date is 2015-03-27 - late winter, not optimal for water penetration",
+          "Tiles are TER/TFR/TFS - NOT the Lumberman tile (TDN)",
+          "B02 on Lumberman tile (16TDN) not available in CMR for 2015-2016",
+          "Need Copernicus download for S2C_16TDN_20250916 B02/B03"
+        ],
+        "parameter_recommendations": {
+          "b02_season": "Summer (Jun-Sep) for clear water penetration",
+          "b02_tile_needed": "16TDN for Lumberman (42.8476, -87.82946)",
+          "note": "B02 needs to be combined with B03 for Stumpf ratio depth analysis"
+        }
+      }
+    ]
+  },
+  "data_sources": {
+    "notes": "Working data sources with their quirks. Agent should reference this before downloading.",
+    "working": {
+      "aws_sentinel1_rtc": {
+        "bucket": "sentinel-s1-rtc-indigo",
+        "access": "public, no auth",
+        "status": "BROKEN \u2014 contains Gulf of Mexico data, not Great Lakes",
+        "note": "Tile 16RBT is Gulf of Mexico (lat~29-30, lon~-89). Need to find correct Great Lakes tiles or use HyP3 processing."
+      },
+      "aws_landsat": {
+        "bucket": "usgs-landsat",
+        "access": "requester-pays (AWS account covers cost)",
+        "path_pattern": "collection02/level-1/standard/oli-tirs/{year}/{path}/{row}/{scene}/",
+        "key_bands": [
+          "B10.TIF (thermal)",
+          "B11.TIF (thermal)",
+          "B4.TIF (red)",
+          "B5.TIF (NIR)"
+        ],
+        "notes": "RequesterPayer flag required. Landsat 8/9. Summer 2025 data available for Path 020."
+      },
+      "aws_sentinel2": {
+        "bucket": "sentinel-s2-l2a",
+        "access": "public",
+        "path_pattern": "tiles/{utm_grid}/{year}/{month}/{day}/0/",
+        "key_bands": [
+          "B02-B08 (10m)",
+          "B11-B12 (20m)"
+        ],
+        "notes": "Level 2A (atmospherically corrected). JP2 format, not GeoTIFF. Tile 16TDN has 2025 data."
+      }
+    },
+    "needs_setup": {
+      "copernicus_dataspace": "Needs username/password. Sentinel-1 SLC + Sentinel-2 MSI.",
+      "usgs_earthexplorer": "Needs API key. Landsat archive.",
+      "hyp3_rtc": "Earthdata JWT works. Submit SLC granules for cloud RTC processing. Takes 1-6 hours.",
+      "sar_real_data": "Need real SAR GeoTIFFs for Great Lakes. Options: 1) HyP3 submit jobs (Earthdata JWT works, just need correct granule names), 2) Find correct ASF RTC bucket tile IDs for Great Lakes, 3) Copernicus Sentinel-1 download with SNAP processing."
+    }
+  },
+  "techniques_to_try": {
+    "notes": "Research ideas and techniques worth testing. Agent should pick one per idle week.",
+    "entries": [
+      {
+        "id": "silt_plume_detection",
+        "name": "Post-storm silt plume analysis for wreck detection",
+        "priority": "high",
+        "status": "not_tested",
+        "notes": "After storms with 20-40mph winds, silt plumes settle over wrecks. Use optical (Sentinel-2 B04/B08) and existing HLS data. Works WITHOUT SAR \u2014 primary detection method until real SAR data arrives."
+      },
+      {
+        "id": "vv_vh_ratio_sar",
+        "name": "VV/VH polarization ratio for SAR wreck detection",
+        "priority": "high",
+        "status": "blocked \u2014 no real SAR data",
+        "notes": "Ratio of VV to VH backscatter may highlight metallic structures better than single-polarization. Steel wrecks have distinct polarization signatures. Requires real Great Lakes SAR GeoTIFFs first."
+      },
+      {
+        "id": "multi_temporal_sar",
+        "name": "Multi-temporal SAR change detection",
+        "priority": "high",
+        "status": "blocked \u2014 no real SAR data",
+        "notes": "Compare SAR images from different dates. Persistent anomalies across dates = real targets. Single-date anomalies = likely noise."
+      },
+      {
+        "id": "ndwi_optical",
+        "name": "NDWI (Normalized Difference Water Index) from Sentinel-2",
+        "priority": "medium",
+        "status": "not_tested",
+        "notes": "NDWI = (Green - NIR) / (Green + NIR). Helps distinguish submerged objects from water column. Use B03 (green) and B08 (NIR)."
+      },
+      {
+        "id": "thermal_time_series",
+        "name": "Thermal time-series analysis",
+        "priority": "medium",
+        "status": "not_tested",
+        "notes": "Steel wrecks retain heat differently than surrounding water. Compare thermal anomalies across multiple dates to find persistent cold/hot spots."
+      },
+      {
+        "id": "depth_filter",
+        "name": "Depth-based filtering",
+        "priority": "high",
+        "status": "not_tested",
+        "notes": "Filter detections by bathymetry. Known wrecks are typically in 100-500ft depth. Exclude shallow (<30ft) and ultra-deep (>600ft) anomalies."
+      },
+      {
+        "id": "blue_green_penetration",
+        "name": "Blue/Green water penetration for shallow wrecks (<100ft)",
+        "priority": "high",
+        "status": "active - search planner can find dates",
+        "notes": "At 50ft depth, NIR (B08) cannot penetrate water. Must use B02 Blue (458-523nm) and B03 Green (543-578nm) which penetrate water column. Lumberman wreck structure should show as dark anomaly in blue/green against surrounding water. Target: 42.8476, -87.82946."
+      },
+      {
+        "id": "blue_green_50ft",
+        "name": "B02/B03 water penetration for 50ft wrecks",
+        "priority": "critical",
+        "status": "needed",
+        "notes": "For Lumberman at 50ft: B02 Blue (458-523nm) penetrates water column best. B03 Green (543-578nm) second. B04 Red moderate. B08 NIR = surface only, useless for submerged wrecks. Current data has NO B02/B03 for 16TDN Sep 2025 - must download from CMR or AWS."
+      },
+      {
+        "id": "blue_green_50ft",
+        "name": "B02/B03 water penetration for shallow wrecks",
+        "priority": "critical",
+        "status": "needed",
+        "notes": "For Lumberman (50ft): Need B02 Blue (458-523nm) + B03 Green (543-578nm). B02 penetrates water column best. Currently NO B02/B03 data for 16TDN Sep 2025 in cache - must download from CMR."
+      },
+      {
+        "id": "blue_green_50ft",
+        "name": "B02/B03 water penetration for shallow wrecks",
+        "priority": "critical",
+        "status": "needed",
+        "notes": "For 50ft wrecks: B02 Blue (458-523nm) and B03 Green (543-578nm) penetrate water. B08 NIR only sees surface. Current data has NO B02/B03 for tile 16TDN Sep 2025 - must download."
+      },
+      {
+        "id": "blue_green_penetration",
+        "name": "B02 Blue (458-523nm) + B03 Green (543-578nm) for 50ft wrecks",
+        "priority": "critical",
+        "status": "active - search planner can find dates",
+        "notes": "At 50ft depth, B08 NIR cannot penetrate water. Must use B02 Blue and B03 Green. Target: Lumberman (42.8476, -87.82946). B02 penetrates ~20m in clear water, B03 ~15m. Need HLS S30 tile 16TDN Sep 16 2025."
+      },
+      {
+        "id": "sar_descending_pass",
+        "name": "SAR descending pass detection for Great Lakes wrecks",
+        "priority": "high",
+        "status": "active - search planner can find dates",
+        "notes": "Descending passes (~18:00 local) show better wreck detection in Great Lakes. Afternoon wind creates capillary waves, submerged steel creates smooth 'shadow' in wave field. Use VV/VH ratio >1.2, coherence >0.6, backscatter -15 to +5 dB."
+      },
+      {
+        "id": "sar_descending_pass",
+        "name": "SAR descending pass (~18:00) for Great Lakes wrecks",
+        "priority": "high",
+        "status": "active - search planner can find dates",
+        "notes": "Descending passes show better wreck detection in Great Lakes. Afternoon wind creates capillary waves, submerged steel creates smooth shadow. VV/VH ratio >1.2, coherence >0.6, backscatter -15 to +5 dB."
+      },
+      {
+        "id": "copernicus_s2c_full_bands",
+        "name": "Download full S2C tile from Copernicus for Lumberman",
+        "priority": "critical",
+        "status": "needed",
+        "notes": "Copernicus has S2C_MSIL2A_20250916T163941_N0511_R126_T16TDN (840MB). This has ALL bands including B02 Blue (458-523nm) for the exact Lumberman date. Download full product and extract B02/B03/B04/B08 for water penetration analysis. Product ID: 489d402d-d658-4d75-8d88-01144fbf8c4f"
+      }
+    ]
+  },
+  "agent_behavior": {
+    "notes": "How the agent should behave. Baked-in instructions so it doesn't need to figure these out each time.",
+    "rules": [
+      "Always check weather for the scan area before recommending optical/thermal scans",
+      "SAR works in all weather \u2014 recommend it when cloud cover > 50%",
+      "Start with known target coordinates before doing wide-area searches",
+      "If a scan finds nothing, try: (1) narrow bbox, (2) lower z-score, (3) add SAR sensor",
+      "If a scan finds too many detections, try: (1) raise z-score to 3.0, (2) require 3-lock instead of 2-lock",
+      "After each scan, update the knowledge_base.json with results",
+      "When idle (no active search), run background probes on known wreck sites to build baseline data",
+      "Pull one new research technique per week and test it on known targets",
+      "BEST SCANNING WINDOW: Check wind history \u2014 ideal conditions are AFTER a storm with sustained winds 20-40mph. This stirs up silt plumes that settle over wrecks, creating visible signatures in optical/SAR data. Scan 12-48 hours after the storm passes, when water is settling but silt is still suspended. Use web search to check: 'wind history Lake Michigan past 3 days' or 'NOAA buoy wind data Great Lakes'.",
+      "SILT PLUME DETECTION: Post-storm silt plumes are the #1 indicator for wreck location. Look for elongated sediment patterns in optical (Sentinel-2 B04/B08) and backscatter anomalies in SAR (VV polarization). Wrecks act as obstacles \u2014 silt deposits downstream create visible streaks.",
+      "Wind direction matters \u2014 scan DOWNWIND of suspected wreck sites after storms.",
+      "Use smart_search_planner.py --auto-plan to search ALL available data, score dates, and build optimal download+scan plan."
+    ]
+  },
+  "sensor_config": {
+    "version": "2026-04-07",
+    "thermal": {
+      "bands": {
+        "B10": {
+          "wavelength": "10.6-11.2 um",
+          "resolution": "100m",
+          "purpose": "Cold-sink detection"
+        },
+        "B11": {
+          "wavelength": "11.5-12.5 um",
+          "resolution": "100m",
+          "purpose": "Cross-validation"
+        }
+      },
+      "thresholds": {
+        "zscore_standard": 2.5,
+        "zscore_aggressive": 2.0,
+        "zscore_conservative": 3.0
+      }
+    },
+    "optical": {
+      "bands": {
+        "B02": {
+          "wavelength": "458-523 nm",
+          "resolution": "10m",
+          "purpose": "Water penetration, shallow hull"
+        },
+        "B03": {
+          "wavelength": "543-578 nm",
+          "resolution": "10m",
+          "purpose": "Surface debris, aluminum"
+        },
+        "B04": {
+          "wavelength": "650-680 nm",
+          "resolution": "10m",
+          "purpose": "Mussel colony, hydrocarbon"
+        },
+        "B08": {
+          "wavelength": "785-900 nm",
+          "resolution": "10m",
+          "purpose": "Glint, surface boats ONLY"
+        },
+        "B11": {
+          "wavelength": "1565-1655 nm",
+          "resolution": "20m",
+          "purpose": "Oil/hydrocarbon"
+        },
+        "B12": {
+          "wavelength": "2100-2280 nm",
+          "resolution": "20m",
+          "purpose": "Steel corrosion"
+        }
+      },
+      "thresholds": {
+        "glint_ratio_b08_b04": 1.5,
+        "zscore": 2.0
+      },
+      "bathymetry": {
+        "B02_Blue_458_523nm": "PRIMARY depth penetration (~15-25m in clear water)",
+        "B03_Green_543_578nm": "Secondary penetration, Stumpf ratio",
+        "B04_Red_650_680nm": "Surface reference (separate water column from bottom)",
+        "B08_NIR_785_900nm": "Water surface/atmospheric correction - does NOT penetrate water",
+        "methods": {
+          "stumpf_ratio": "Depth = m1 * ln(n * R_blue) / ln(n * R_green) + m0",
+          "lyzenga": "Depth = a * ln(R_blue) + b * ln(R_green) + c",
+          "ndwi_water_mask": "(B03 - B08) / (B03 + B08)"
+        },
+        "thresholds": {
+          "bathymetry_zscore": 2.0,
+          "blue_green_ratio_zscore": 1.5,
+          "clear_spot_ndwi": 0.3
+        }
+      }
+    },
+    "sar": {
+      "core": {
+        "polarization": "VV + VH (dual-pol)",
+        "mode": "IW (Interferometric Wide, 250km swath)",
+        "resolution": "10m raw SLC, 30m RTC-processed",
+        "incidence_angle": "30-45 degrees (optimal for Great Lakes)"
+      },
+      "hyp3_rtc": {
+        "dem": "ArcticDEM / REMA / GLO30",
+        "radiometry": "GAMMA0 (Gamma-naught)",
+        "scale": "DECIBEL (dB)",
+        "speckle_filter": "Refined Lee 5x5",
+        "output_resolution": "30m"
+      },
+      "thresholds": {
+        "standard": {
+          "coherence": 0.6,
+          "vv_vh_ratio": 1.2,
+          "backscatter_db": [
+            -15,
+            5
+          ]
+        },
+        "aggressive": {
+          "coherence": 0.5,
+          "vv_vh_ratio": 1.1,
+          "backscatter_db": [
+            -20,
+            10
+          ]
+        },
+        "conservative": {
+          "coherence": 0.75,
+          "vv_vh_ratio": 1.3,
+          "backscatter_db": [
+            -10,
+            0
+          ]
+        }
+      },
+      "signatures": {
+        "exposed_steel_hull": "High VV, low VH (smooth metal = corner reflector)",
+        "submerged_wreck": "Moderate VV, high VH (volume scattering through water)",
+        "debris_field": "High VH, moderate VV (diffuse scattering)",
+        "oil_hydrocarbon_sheen": "Very low VV, very low VH (smooth surface dampens capillary waves)",
+        "mussel_covered_wreck": "Moderate VV, moderate VH (rough biological surface)"
+      },
+      "orbit_passes": {
+        "ascending": "~06:00 local, 6-12 day revisit, morning surface, lower wind",
+        "descending": "~18:00 local, 6-12 day revisit, BETTER for Great Lakes (afternoon wind creates capillary waves, submerged steel creates smooth shadow)"
+      }
+    },
+    "pipeline": [
+      "Thermal (B10/B11) z>2.5",
+      "Optical (B04/B08) glint>1.5",
+      "SAR (VV/VH) coherence>0.6",
+      "SWOT SSH>15mm",
+      "Triple-Lock (3+ sensors)"
+    ]
+  }
+}

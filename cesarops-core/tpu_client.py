@@ -10,17 +10,35 @@ from io import BytesIO
 from PIL import Image
 from pathlib import Path
 
+XENON_TPU_URL  = "http://10.0.0.40:5001"
+LOCAL_TPU_URL  = "http://localhost:5001"
+_FALLBACK_URLS = [XENON_TPU_URL, LOCAL_TPU_URL]
+
+
+def create_tpu_client(prefer_xenon: bool = True) -> "TPUClient":
+    """
+    Return a TPUClient connected to the first reachable TPU server.
+    Order: Xenon (10.0.0.40:5001) → localhost:5001 → CPU stub.
+    """
+    urls = _FALLBACK_URLS if prefer_xenon else list(reversed(_FALLBACK_URLS))
+    for url in urls:
+        client = TPUClient(url)
+        h = client.health_check()
+        if h.get("status") == "healthy":
+            return client
+    # Nothing reachable — return client that will use CPU stub health path
+    return TPUClient(LOCAL_TPU_URL)
+
+
 class TPUClient:
     """Client for remote TPU inference"""
     
-    def __init__(self, server_url="http://localhost:5001"):
+    def __init__(self, server_url=LOCAL_TPU_URL):
         """
-        Initialize TPU client
-        
+        Initialize TPU client.
+
         Args:
-            server_url: TPU server URL
-                - Laptop: "http://10.0.0.55:5001" (Xenon's IP)
-                - Xenon: "http://localhost:5001" (local)
+            server_url: TPU server URL (use create_tpu_client() for auto-discovery)
         """
         self.server_url = server_url
     
@@ -62,27 +80,49 @@ class TPUClient:
             return response.json()
             
         except requests.exceptions.ConnectionError:
-            # Server unreachable, return safe default
-            print(f"⚠ TPU server unreachable: {self.server_url}")
-            print("  Assuming PASS (no glint/jitter detected)")
+            # Server unreachable — run lightweight CPU stub fallback
+            print(f"⚠ TPU server unreachable: {self.server_url} — falling back to CPU stub")
+            return self._cpu_fallback_inference(image)
+        
+        except Exception as e:
+            print(f"⚠ TPU inference failed: {e} — falling back to CPU stub")
+            return self._cpu_fallback_inference(image)
+
+    def _cpu_fallback_inference(self, image) -> dict:
+        """
+        Pure-Python CPU stub inference used when no TPU/Flask server is available.
+        Performs the same local-maxima glint check as tpu_server.py's run_inference().
+        """
+        try:
+            import numpy as np
+            img_bytes = self._image_to_bytes(image)
+            from PIL import Image as _PIL
+            from io import BytesIO as _BytesIO
+            arr = np.array(_PIL.open(_BytesIO(img_bytes)).convert('L'), dtype=np.float32)
+            thresh = float(np.nanpercentile(arr, 99.5))
+            bright_pct = float(np.mean(arr >= thresh))
+            glint_score = min(bright_pct * 20.0, 1.0)   # scale 0.5% bright pixels → 0.1 score
+            # Jitter: measure local gradient variance as proxy
+            gy = arr[1:, :] - arr[:-1, :]
+            gx = arr[:, 1:] - arr[:, :-1]
+            jitter_score = min(float(np.std(gy)) / 64.0, 1.0)
+            return {
+                'glint_score': round(glint_score, 4),
+                'jitter_score': round(jitter_score, 4),
+                'pass': glint_score < 0.5 and jitter_score < 0.5,
+                'took_ms': 0,
+                'used_tpu': False,
+                'backend': 'cpu_stub',
+            }
+        except Exception as e:
             return {
                 'glint_score': 0.0,
                 'jitter_score': 0.0,
                 'pass': True,
                 'took_ms': 0,
                 'used_tpu': False,
-                'error': 'server_unreachable'
-            }
-        
-        except Exception as e:
-            print(f"⚠ TPU inference failed: {e}")
-            return {
-                'glint_score': 0.0,
-                'jitter_score': 0.0,
-                'pass': True,  # Fail-safe: assume OK
-                'took_ms': 0,
-                'used_tpu': False,
-                'error': str(e)
+                'backend': 'cpu_stub_failed',
+                'error': str(e),
             }
     
     def health_check(self):

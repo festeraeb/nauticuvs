@@ -166,6 +166,86 @@ pub fn gpu_warp_with_config<P: AsRef<Path>>(
     })
 }
 
+/// Get the GeoTransform from any GDAL-readable file by shelling out to `gdalinfo -json`.
+///
+/// Returns `None` if `gdalinfo` is unavailable or the file has no georeference.
+/// The returned array is the standard 6-element GDAL GeoTransform:
+///   [origin_x, pixel_width, row_rot, origin_y, col_rot, pixel_height]
+pub fn gdalinfo_geo_transform<P: AsRef<Path>>(path: P) -> Option<crate::io::geotiff::GeoTransform> {
+    let output = Command::new("gdalinfo")
+        .arg("-json")
+        .arg(path.as_ref())
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let arr = json.get("geoTransform")?.as_array()?;
+    if arr.len() < 6 {
+        return None;
+    }
+
+    let mut gt = [0.0f64; 6];
+    for (i, v) in arr.iter().enumerate().take(6) {
+        gt[i] = v.as_f64()?;
+    }
+    Some(gt)
+}
+
+/// Returns true if a file's pixel size indicates a projected CRS (meters, not degrees).
+///
+/// Pixel widths > 1.0 unit are meters (UTM, etc.). Geographic lat/lon rasters
+/// have sub-degree pixel sizes (< 0.01 typically).
+/// Falls back to `false` if `gdalinfo` is unavailable.
+pub fn is_projected_crs<P: AsRef<Path>>(path: P) -> bool {
+    match gdalinfo_geo_transform(path) {
+        Some(gt) => gt[1].abs() > 1.0 || gt[5].abs() > 1.0,
+        None => false,
+    }
+}
+
+/// CRS hint derived from a GeoTransform without calling any external tool.
+///
+/// Used by the anchor calculator to set `native_crs` when no GDAL is available.
+/// Not definitive — just a heuristic for the sidecar JSON.
+pub fn crs_hint_from_geo_transform(geo_transform: &crate::io::geotiff::GeoTransform) -> String {
+    if geo_transform[1].abs() > 1.0 || geo_transform[5].abs() > 1.0 {
+        // Pixel size is in meters — almost certainly a projected CRS (UTM)
+        String::from("PROJECTED:UNKNOWN")
+    } else {
+        String::from("EPSG:4326")
+    }
+}
+
+/// Reproject a GeoTIFF to EPSG:4326 using gdalwarp if it is in a projected CRS.
+///
+/// Returns the path to use for slicing: the warped output if reprojection was
+/// needed, or the original path if it was already geographic.
+pub fn normalize_to_wgs84<P: AsRef<Path>, Q: AsRef<Path>>(
+    input: P,
+    output_dir: Q,
+    config: WarpConfig,
+) -> Result<std::path::PathBuf, WarpError> {
+    let input = input.as_ref();
+    let output_dir = output_dir.as_ref();
+
+    if !is_projected_crs(input) {
+        return Ok(input.to_path_buf());
+    }
+
+    let stem = input
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy();
+    let warped = output_dir.join(format!("{}_wgs84.tif", stem));
+
+    gpu_warp_with_config(input, &warped, None, config)?;
+    Ok(warped)
+}
+
 /// Check if gdalwarp is available.
 pub fn check_gpu_warp_available() -> bool {
     Command::new("gdalwarp")

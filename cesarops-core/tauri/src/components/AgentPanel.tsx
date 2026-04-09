@@ -102,8 +102,9 @@ export default function AgentPanel() {
     setRunning(true);
     setOutput("🔍 Querying NASA Catalog via Rust SDK...");
     try {
-      // 1. Ask Rust to find data
+      // 1. Ask Rust to query the real NASA CMR catalog
       const manifest: any = await invoke("search_nasa_granules", {
+        workDir: workDir || '../',
         bbox: [44.5, -92.0, 47.0, -80.0],
         startDate: "2024-06-01",
         endDate: "2024-10-30",
@@ -114,17 +115,20 @@ export default function AgentPanel() {
       setOutput(`✅ Found ${count} granules! Starting Swarm Download...`);
       addTask(`NASA Search`, `Found ${count} granules. Starting download swarm...`, '', 'running');
 
-      // 2. Trigger the Python Swarm
+      // 2. Trigger the Python Swarm via run_task.
+      //    NOTE: Rust's run_task() parameter is named `cwd` (not work_dir) —
+      //    pass it exactly as `cwd` so Tauri/serde doesn't rename it.
+      const resolvedDir = workDir || '../';
       const res: any = await invoke("run_task", {
-        taskId: `dl-rust-${Date.now()}`,
+        taskId: `dl-swarm-${Date.now()}`,
         script: "batch_download_manager.py",
-        args: ['--lakes', 'all', '--start', '2013', '--end', '2025'],
-        workDir: workDir || '../'
+        args: ['--lakes', 'all', '--start', '2020', '--end', '2025', '--sensors', 'hls,sar'],
+        cwd: resolvedDir,
       });
       
       setOutput(res.stdout || "");
       if (res.stderr) setOutput((prev) => prev + "\n\n--- stderr ---\n" + res.stderr);
-      addTask("Swarm Download (2013-2025)", (res.stdout || "").slice(-200), (res.stderr || "").slice(-200), res.status);
+      addTask("Swarm Download (2020-2025 all lakes)", (res.stdout || "").slice(-400), (res.stderr || "").slice(-200), res.status);
     } catch (e: any) {
       setOutput(`❌ Error: ${e}`);
       addTask("Smart Download", "", String(e), "error");
@@ -150,7 +154,7 @@ export default function AgentPanel() {
         />
       </div>
 
-      {/* Request input */}
+      {/* Request input + action buttons */}
       <div style={{ display: "flex", gap: 8 }}>
         <textarea
           rows={3}
@@ -174,6 +178,25 @@ export default function AgentPanel() {
             📡 Nodes
           </button>
         </div>
+      </div>
+
+      {/* ── Swarm Download — full-width row so it's never clipped ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <button
+          onClick={handleSmartDownload}
+          disabled={running}
+          style={{
+            padding: "10px 24px", borderRadius: 6, border: "none",
+            background: running ? "#333" : "#059669",
+            color: "#fff", cursor: running ? "not-allowed" : "pointer",
+            fontSize: 13, fontWeight: "bold", flexShrink: 0,
+          }}
+        >
+          📥 {running ? "Downloading…" : "Swarm Download"}
+        </button>
+        <span style={{ fontSize: 11, color: "#8b949e" }}>
+          Searches NASA catalog then runs <code style={{ background: "#1a1a2e", padding: "1px 4px", borderRadius: 3 }}>batch_download_manager.py</code> — all lakes, 2020–2025, HLS+SAR
+        </span>
       </div>
 
       {/* Output */}

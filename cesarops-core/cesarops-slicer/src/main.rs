@@ -13,6 +13,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use tracing::info;
 
+use cesarops_slicer::io::gdal_warp;
 use cesarops_slicer::spec::delegate::DelegateRouter;
 use cesarops_slicer::io::geotiff::MmapGeoTiff;
 use cesarops_slicer::io::vrt::{VrtDataset, VrtNormalizer, VrtSource, ResampleMethod};
@@ -162,20 +163,61 @@ fn main() -> Result<()> {
 
             for input in &inputs {
                 info!("Processing: {:?}", input);
-                let tiff = MmapGeoTiff::open(input)?;
+
+                // Auto-detect projected CRS (e.g. SAR in UTM) and warp to EPSG:4326
+                // before slicing. Landsat/Sentinel COGs are already geographic — no-op.
+                let input = if gdal_warp::is_projected_crs(input) {
+                    info!(
+                        "  Detected projected CRS (SAR/UTM) — warping to EPSG:4326 first..."
+                    );
+                    std::fs::create_dir_all(&output).context("failed to create output dir")?;
+                    match gdal_warp::normalize_to_wgs84(
+                        input,
+                        &output,
+                        gdal_warp::WarpConfig::default(),
+                    ) {
+                        Ok(warped) => {
+                            info!("  Warped → {:?}", warped);
+                            warped
+                        }
+                        Err(e) => {
+                            tracing::warn!("  gdalwarp failed ({}), slicing as-is", e);
+                            input.clone()
+                        }
+                    }
+                } else {
+                    input.clone()
+                };
+
+                let tiff = MmapGeoTiff::open(&input)?;
                 info!(
                     "  {}x{}, {} bands, provider: {}",
                     tiff.width, tiff.height, tiff.band_count, spec.target_ref
                 );
 
-                // Use search_params bounds as a rough geo transform hint
+                // Derive pixel size in degrees from gdalinfo if available,
+                // otherwise compute from mission bounds assuming ~10m at 45°N.
+                let pixel_deg = gdal_warp::gdalinfo_geo_transform(&input)
+                    .filter(|gt| gt[1].abs() < 1.0) // already geographic
+                    .map(|gt| gt[1].abs())
+                    .unwrap_or_else(|| {
+                        // Fallback: use tile_size to estimate from bounds span
+                        let tile_size = spec.search_params.tile_size.unwrap_or(1024) as f64;
+                        let span = (spec.search_params.bounds[0] - spec.search_params.bounds[2]).abs();
+                        // Rough: 10m at center lat scaled to degrees
+                        let center_lat = (spec.search_params.bounds[0] + spec.search_params.bounds[2]) / 2.0;
+                        let _ = (tile_size, span); // suppress unused warnings
+                        10.0 / (111_320.0 * center_lat.to_radians().cos().max(0.001))
+                    });
+
+                // Use search_params bounds for origin; pixel size derived above
                 let gt = [
                     spec.search_params.bounds[3], // west (origin_x)
-                    0.0001,                       // ~10m pixel width (rough)
+                    pixel_deg,
                     0.0,
                     spec.search_params.bounds[0], // north (origin_y)
                     0.0,
-                    -0.0001, // ~10m pixel height
+                    -pixel_deg,
                 ];
 
                 let bands: Vec<u16> = (0..tiff.band_count).collect();

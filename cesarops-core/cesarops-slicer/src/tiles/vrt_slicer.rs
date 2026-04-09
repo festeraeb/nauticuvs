@@ -258,14 +258,19 @@ pub fn build_vrt_from_mission(
 ) -> Result<VrtDataset> {
     let normalizer = VrtNormalizer::new(target_resolution, "EPSG:4326".into());
 
+    // Compute pixel size in degrees from target_resolution (meters) at the mission center lat.
+    // For Lake Michigan (~45°N): 10m ≈ 0.0001°, 30m ≈ 0.00027°.
+    let center_lat = (mission.search_params.bounds[0] + mission.search_params.bounds[2]) / 2.0;
+    let pixel_deg = target_resolution / (111_320.0 * center_lat.to_radians().cos().max(0.001));
+
     // Use mission bounds for geo transform
     let gt: GeoTransform = [
         mission.search_params.bounds[3], // west
-        0.0001,                          // ~10m
+        pixel_deg,
         0.0,
         mission.search_params.bounds[0], // north
         0.0,
-        -0.0001,
+        -pixel_deg,
     ];
 
     // Determine resampling: if native res != target, use bilinear
@@ -430,8 +435,9 @@ impl VrtTileSlicer {
                 let east_lon = east.origin_lon;
                 let overlap_lon = this_east_lon - east_lon;
 
-                let this_south_lat = entry.origin_lat + tile_size * gt[5].abs();
-                let east_south_lat = east.origin_lat + tile_size * gt[5].abs();
+                // gt[5] is negative for north-up: origin_lat + tile_size * gt[5] moves south
+                let this_south_lat = entry.origin_lat + tile_size * gt[5];
+                let east_south_lat = east.origin_lat + tile_size * gt[5];
                 let overlap_lat = this_south_lat.min(east_south_lat) - entry.origin_lat.max(east.origin_lat);
 
                 if overlap_lon > 0.0 && overlap_lat > 0.0 {
@@ -457,7 +463,8 @@ impl VrtTileSlicer {
 
             // Check south neighbor
             if let Some(south) = tile_map.get(&(col, row + 1)) {
-                let this_south_lat = entry.origin_lat + tile_size * gt[5].abs();
+                // gt[5] is negative for north-up: origin_lat + tile_size * gt[5] moves south
+                let this_south_lat = entry.origin_lat + tile_size * gt[5];
                 let south_lat = south.origin_lat;
                 let overlap_lat = this_south_lat - south_lat;
 

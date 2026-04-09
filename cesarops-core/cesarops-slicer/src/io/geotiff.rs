@@ -266,8 +266,6 @@ impl MmapGeoTiff {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_tile_counts() {
         // Test the tile math directly without constructing MmapGeoTiff

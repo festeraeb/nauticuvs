@@ -18,6 +18,7 @@ SWOT LR SSH NetCDF variables used:
 """
 
 import json
+import os
 import sqlite3
 import sys
 import tempfile

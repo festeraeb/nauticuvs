@@ -25,6 +25,9 @@ cesarops-slicer/target/
 # Outputs
 outputs/
 
+# Downloaded satellite data (large binary files, not for git)
+downloads/
+
 # Syncthing
 .stfolder/
 *.sync-conflict-*

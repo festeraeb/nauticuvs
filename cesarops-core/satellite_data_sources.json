@@ -1,5 +1,59 @@
 {
   "satellite_data_sources": {
+    "noaa_coastwatch_erddap": {
+      "name": "NOAA CoastWatch ERDDAP — Great Lakes SST",
+      "description": "GLSEA daily Great Lakes Surface Environmental Analysis: AVHRR+GOES composite SST at ~1.8 km. Covers all 5 Great Lakes. Best free thermal baseline before/after optical passes.",
+      "url": "https://coastwatch.glerl.noaa.gov/erddap/griddap/GLSEA_GCS.html",
+      "api_url": "https://coastwatch.glerl.noaa.gov/erddap/griddap/GLSEA_GCS.nc",
+      "requires_api_key": false,
+      "env_key": null,
+      "sensor_class": "thermal_sst",
+      "variables": ["surface_temp"],
+      "resolution": "~1.8 km/pixel",
+      "temporal_coverage": "1995-present",
+      "notes": "Completely free, no registration. NetCDF download via ERDDAP subset URL. Use --sensors sst in universal_downloader.py"
+    },
+    "usgs_3dep_lidar": {
+      "name": "USGS 3D Elevation Program (3DEP) — LiDAR",
+      "description": "National LiDAR point clouds and 1m/3m DEMs for all Great Lakes shorelines. Includes nearshore bathymetric LiDAR in some areas.",
+      "url": "https://www.usgs.gov/3d-elevation-program",
+      "api_url": "https://tnmapi.cr.usgs.gov/api/products",
+      "requires_api_key": false,
+      "env_key": null,
+      "sensor_class": "lidar",
+      "products": {
+        "lpc": "Lidar Point Cloud (.laz) — raw point returns",
+        "dem_1m": "1-meter bare-earth DEM (GeoTIFF)",
+        "dem_3dep": "1/3 Arc-Second DEM (10m) — full coverage"
+      },
+      "notes": "Free, no registration. Use --sensors lidar. LPC files can be multi-GB — use --max-results 5 for initial test."
+    },
+    "modis_thermal": {
+      "name": "MODIS MOD11A1/MYD11A1 — Daily 1km LST",
+      "description": "Terra and Aqua MODIS land surface temperature: 1-km daily, day+night passes. Best thermal complement to Landsat (much higher temporal frequency). Requires same Earthdata credentials as HLS/SWOT.",
+      "url": "https://lpdaac.usgs.gov/products/mod11a1v061/",
+      "api_url": "https://cmr.earthdata.nasa.gov/search/granules.json",
+      "requires_api_key": true,
+      "env_key": "EARTHDATA_TOKEN",
+      "collections": ["MOD11A1 v061", "MYD11A1 v061", "VNP21A1D v002 (VIIRS)"],
+      "variables": ["LST_Day_1km", "LST_Night_1km", "QC_Day", "QC_Night"],
+      "resolution": "1 km/pixel",
+      "notes": "Use --sensors thermal or --sensors modis. Same EARTHDATA_TOKEN as HLS downloads."
+    },
+    "icesat2_atl03": {
+      "name": "ICESat-2 ATL03 — Geolocated Photons (LiDAR)",
+      "description": "Individual photon returns from ICESat-2 ATLAS laser altimeter. ATL03 provides ~0.7m footprint at ~60-170m spacing. Water-penetrating green (532nm) channel enables shallow bathymetry in clear Great Lakes water to ~15-25m depth.",
+      "url": "https://nsidc.org/data/atl03",
+      "api_url": "https://cmr.earthdata.nasa.gov/search/granules.json",
+      "requires_api_key": true,
+      "env_key": "EARTHDATA_TOKEN",
+      "collections": ["ATL03 v006", "ATL13 v006 (inland water height)"],
+      "variables": {
+        "atl03": ["delta_time", "reference_photon_lat", "reference_photon_lon", "h_ph", "signal_conf_ph"],
+        "atl13": ["delta_time", "latitude", "longitude", "ht_water_surf"]
+      },
+      "notes": "Same EARTHDATA_TOKEN. ATL03 files ~1-5 GB per granule. Use --sensors icesat2. Add --max-results 3 for test run."
+    },
     "usgs_earth_explorer": {
       "name": "USGS Earth Explorer",
       "description": "Landsat 8/9 archive (2013-present). Thermal (B10/B11), optical (B02-B07).",

@@ -155,25 +155,13 @@ async fn run_task(
     let mode = AppMode::Thin;
     let python = mode.python();
 
-    // Resolve work directory to absolute path
+    // Resolve work directory using the core-dir detection logic
     let work_dir = {
-        let raw = match cwd {
-            Some(ref d) if !d.is_empty() => d.clone(),
-            _ => std::env::current_dir()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| ".".into()),
+        let raw = match &cwd {
+            Some(d) if !d.is_empty() => d.as_str(),
+            _ => "",
         };
-        let p = std::path::Path::new(&raw);
-        if p.is_absolute() {
-            raw
-        } else {
-            // Resolve relative path from current_exe parent
-            std::env::current_dir()
-                .ok()
-                .and_then(|cwd| cwd.join(p).canonicalize().ok())
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or(raw)
-        }
+        resolve_work_dir(raw).to_string_lossy().to_string()
     };
 
     let mut cmd = Command::new(python);

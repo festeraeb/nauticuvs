@@ -144,9 +144,48 @@ def llm_interpret_results(results: list, config: dict) -> str:
         )},
     ])
 
+LAKES = ["michigan", "superior", "huron", "erie", "ontario"]
+EXPECTED_SENSORS = ["hls", "sar"]  # minimum viable data set per lake
+
+
 def log(msg, level="INFO"):
     ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
     print(f"[{ts}] {level:6} | {msg}")
+
+
+def local_data_inventory(downloads_dir: Path) -> dict:
+    """Return per-lake file counts from the local downloads/ directory."""
+    inv = {}
+    for lake in LAKES:
+        lake_dir = downloads_dir / lake
+        if lake_dir.exists():
+            files = [f for f in lake_dir.rglob("*") if f.is_file()]
+            inv[lake] = {"files": len(files), "dir": str(lake_dir)}
+        else:
+            inv[lake] = {"files": 0, "dir": str(lake_dir), "missing": True}
+    return inv
+
+
+def trigger_missing_data_fetch(missing_lakes: list, work_dir: Path):
+    """Spawn batch_download_manager.py for lakes that have no data."""
+    if not missing_lakes:
+        return
+    lakes_arg = ",".join(missing_lakes)
+    log(f"📥 Triggering data fetch for: {lakes_arg}")
+    cmd = [
+        sys.executable,
+        str(work_dir / "batch_download_manager.py"),
+        "--lakes", lakes_arg,
+        "--start", "2022",
+        "--end", "2024",
+        "--sensors", "hls,sar",
+    ]
+    log(f"   CMD: {' '.join(cmd)}")
+    try:
+        proc = subprocess.Popen(cmd, cwd=str(work_dir))
+        log(f"   Download spawned (PID {proc.pid}) — check downloads/ for progress")
+    except Exception as e:
+        log(f"   ❌ Failed to spawn download: {e}", "ERROR")
 
 def run_sensor_tool(sensor_name, area_cfg, thresholds):
     """Execute a sensor tool. Returns dict with status & output path."""
@@ -292,6 +331,24 @@ def main():
             print(f"{'='*60}")
         else:
             print(json.dumps(status, indent=2))
+
+        # ── Local data inventory + auto-fetch ─────────────────────────────
+        work_dir = Path(__file__).parent
+        downloads_dir = work_dir / "downloads"
+        inv = local_data_inventory(downloads_dir)
+        missing = [lake for lake, info in inv.items() if info.get("files", 0) == 0]
+
+        if args.status:
+            print("\n--- Data Inventory ---")
+            for lake, info in inv.items():
+                status_icon = "✅" if info.get("files", 0) > 0 else "❌"
+                print(f"  {status_icon} {lake}: {info.get('files', 0)} file(s)")
+            if missing:
+                print(f"\n⚠️  Missing data for: {', '.join(missing)}")
+                print("   Auto-fetching — spawning batch_download_manager.py ...")
+                trigger_missing_data_fetch(missing, work_dir)
+            else:
+                print("\n✅ Data present for all lakes")
 
         d.close()
         return

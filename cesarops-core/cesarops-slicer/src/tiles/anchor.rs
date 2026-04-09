@@ -109,7 +109,7 @@ impl AnchorCalculator {
             bands: vec![],              // Filled in by slicer
             acquisition_time: None,     // Filled in from metadata
             provider: String::from("unknown"),
-            native_crs: String::from("EPSG:4326"),
+            native_crs: crate::io::gdal_warp::crs_hint_from_geo_transform(&self.geo_transform),
         }
     }
 }
