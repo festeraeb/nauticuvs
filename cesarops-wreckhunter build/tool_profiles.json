@@ -1,0 +1,29 @@
+{
+  "default_profile": "wreckhunter",
+  "profiles": {
+    "wreckhunter": [
+      "thermal",
+      "optical",
+      "sar",
+      "triple_lock",
+      "download_fox_beaver",
+      "download_full_lake",
+      "swot",
+      "atl13"
+    ],
+    "base": [
+      "thermal",
+      "optical",
+      "sar",
+      "triple_lock"
+    ],
+    "research": [
+      "thermal",
+      "optical",
+      "sar",
+      "triple_lock",
+      "swot",
+      "atl13"
+    ]
+  }
+}
