@@ -3,7 +3,7 @@
 Full Lake Michigan / Straits of Mackinac Scan — CPU/GPU Hybrid Z-Score to KMZ Output
 
 Sensors processed:
-  - B02 (Blue 458-523nm)  : Water-penetrating optical, submerged wreck hulls ≤25m
+  - B02 (Blue 458-523nm)  : Water-penetrating optical — up to ~55m/180ft in Lake Michigan clarity
   - B03 (Green 543-578nm) : Stumpf-ratio bathymetry partner
   - B04 (Red 650-680nm)   : Surface reference + thin oil sheen (elevated Red over dark water)
   - B10 (Thermal LWIR)    : Cold-sink detection — submerged steel mass
@@ -17,7 +17,7 @@ Hydrocarbon mode:
   - SAR smooth-dark: BOTH VV and VH anomalously low = oil damping capillary waves
 
 Known wreck flagging:
-  - If any detection falls within 0.03° of a known wreck anchor, it is flagged KNOWN_WRECK_HIT
+  - If any detection falls within 0.004° (~444m) of a known wreck anchor, it is flagged KNOWN_WRECK_HIT
   - These are ground-truth calibration hits (good!) — still reported, tagged separately
 
 GPU: CuPy on Quadro P1000/M2200.  Falls back to NumPy CPU automatically.
@@ -109,16 +109,41 @@ def apply_anchor_calibration(lat, lon):
 
 
 # ── Known Wreck Registry (for ground-truth hit tagging) ──────────────────────
-# If a detection falls within KNOWN_WRECK_RADIUS_DEG of any of these, it is
-# flagged as a KNOWN_WRECK_HIT — still reported, but labelled separately.
-KNOWN_WRECKS = [
-    {"id": "gilcher",       "name": "Gilcher (Fox Islands)",         "lat": 45.900, "lon": -84.500,  "depth_ft": 220, "type": "wooden_freighter",   "year_lost": 1892},
-    {"id": "parnell",       "name": "Parnell (Beaver Islands)",      "lat": 45.700, "lon": -85.500,  "depth_ft": 180, "type": "freighter",          "year_lost": 1889},
-    {"id": "carl_d_bradley","name": "SS Carl D. Bradley",            "lat": 45.670, "lon": -85.580,  "depth_ft": 360, "type": "limestone_freighter","year_lost": 1958},
-    {"id": "lumberman",     "name": "Lumberman (training wreck)",    "lat": 42.848, "lon": -87.830,  "depth_ft": 50,  "type": "lumber_schooner",    "year_lost": 1893},
-    {"id": "andaste",       "name": "Andaste (search area)",         "lat": 42.950, "lon": -86.450,  "depth_ft": 450, "type": "steel_freighter",    "year_lost": 1905},
-    {"id": "chicorah",      "name": "Chicorah",                      "lat": 42.450, "lon": -87.300,  "depth_ft": 150, "type": "steamer",            "year_lost": 1895},
-]
+# Loaded dynamically from known_wrecks.json so all wrecks — including Straits
+# bridge wrecks (Minneapolis, Cedarville, M. Stalker, etc.) — are included.
+# Only entries with confirmed numeric lat/lon are added.  Falls back to a
+# minimal stub if the file is missing or unreadable.
+def _load_known_wrecks() -> list:
+    _here = Path(__file__).parent if "__file__" in globals() else Path(".")
+    _json_path = _here / "known_wrecks.json"
+    try:
+        import json as _json
+        raw = _json.load(open(_json_path, encoding="utf-8"))
+        wrecks_dict = raw.get("wrecks", {})
+        out = []
+        for wreck_id, w in wrecks_dict.items():
+            lat = w.get("lat")
+            lon = w.get("lon")
+            if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+                continue  # skip entries with unknown coords ("?")
+            out.append({
+                "id":        wreck_id,
+                "name":      w.get("name", wreck_id),
+                "lat":       float(lat),
+                "lon":       float(lon),
+                "depth_ft":  w.get("depth_ft"),
+                "type":      w.get("type", "unknown"),
+                "year_lost": w.get("year_lost"),
+            })
+        print(f"[registry] Loaded {len(out)} known wrecks from {_json_path.name}", flush=True)
+        return out
+    except Exception as _e:
+        print(f"[registry] WARNING: could not load {_json_path}: {_e} — using stub", flush=True)
+        return [
+            {"id": "lumberman", "name": "Lumberman", "lat": 42.8476, "lon": -87.82946, "depth_ft": 50, "type": "lumber_schooner", "year_lost": 1893},
+        ]
+
+KNOWN_WRECKS = _load_known_wrecks()
 KNOWN_WRECK_RADIUS_DEG = 0.004  # ~444m (~500 yards) — tight ground-truth hit radius
 
 # Line 5 pipeline corridor through Straits of Mackinac (Enbridge dual pipeline)
@@ -277,6 +302,160 @@ def process_hydrocarbon_bands(b11_path: Path, b04_path: Path,
         tag = det["hc_subtype"]
         print(f"      Blob {blob_id}: {area_px}px  z={z_val:.2f}  → {tag}  ({lat_v:.5f}, {lon_v:.5f})")
 
+    return detections
+
+
+def compute_nauticuvs_pass(band_tif: Path, scan_bbox=None,
+                            sigma_scales=(1.5, 2.5, 4.0),
+                            energy_threshold: float = 3.5,
+                            top_n: int = 50) -> list:
+    """
+    NauticUVs proxy: multi-scale Laplacian-of-Gaussian (LoG) blob detection.
+
+    Approximates the key output of the FDCT (Fast Discrete Curvelet Transform)
+    curvelet energy analysis without requiring the curvelop library.
+
+    Physics behind this for submerged wrecks:
+      At 75-128ft depth (Straits wrecks), the hull is at/beyond the optical floor
+      BUT creates a surface expression:
+        - Upwelling from the cold hull disturbs water surface capillary wave pattern
+        - Thermal plume (B10): cold water rises from hull, creates a 50-200m cold pool
+        - B02 blue: sediment disturbance halo and slight subsurface reflectance bump
+      The surface expression is a compact blob (~3-6 pixels at 30m/px = 90-180m).
+
+    LoG at sigma=1.5-4.0 pixels (45-120m hull-scale features):
+      - Strong positive LoG peak = compact bright blob (reflectance bump or turbidity ring)
+      - Strong negative LoG peak = compact dark blob (cold pool over cold-sink hull in B10)
+      - fdct_energy_ratio = peak LoG response / scene LoG std (curvelet energy proxy)
+      - directional_strength = max oriented gradient / mean gradient (hull elongation)
+      - edge_density = fraction of supra-threshold LoG pixels in 5x5 neighborhood
+
+    Works on:
+      - B02 (blue): surface disturbance blobs, subsurface reflectance anomalies
+      - B10 (thermal): cold plume blobs over submerged steel cold-sinks
+    """
+    from rasterio.warp import transform as warp_transform
+    from scipy.ndimage import gaussian_laplace, sobel
+
+    if not band_tif.exists():
+        return []
+
+    band_label = 'B10_thermal' if ('B10' in band_tif.name.upper() or
+                                    'THERMAL' in band_tif.name.upper()) else 'B02_blue'
+    print(f"  [NUV] NauticUVs LoG scan: {band_tif.name}  ({band_label})")
+
+    with rasterio.open(band_tif) as src:
+        data = src.read(1).astype(np.float32)
+
+    # Mask nodata
+    nodata_mask = (data <= 0) | ~np.isfinite(data)
+    data[nodata_mask] = np.nan
+
+    # Normalize to 0-1 range on valid pixels for consistent LoG response
+    valid_data = data[~nodata_mask]
+    if valid_data.size < 200:
+        print(f"    [NUV] Insufficient valid pixels — skipping")
+        return []
+    v_min = float(np.nanpercentile(valid_data, 2))
+    v_max = float(np.nanpercentile(valid_data, 98))
+    if v_max - v_min < 1e-6:
+        return []
+    norm = np.where(nodata_mask, 0.0, np.clip((data - v_min) / (v_max - v_min), 0.0, 1.0))
+
+    # Multi-scale LoG: sum responses across hull-scale sigmas
+    # For B10 cold-sink → invert so cold blobs become positive peaks
+    invert = 'B10' in band_tif.name.upper() or 'THERMAL' in band_tif.name.upper()
+    log_combined = np.zeros_like(norm)
+    for sigma in sigma_scales:
+        log_scale = -gaussian_laplace(norm, sigma=sigma)  # negative LoG = bright blob detector
+        if invert:
+            log_scale = -log_scale  # cold blobs are negative before inversion
+        log_combined += log_scale
+
+    # Scene statistics for energy ratio (curvelet energy proxy)
+    log_valid = log_combined[~nodata_mask]
+    log_mean = float(np.nanmean(log_valid))
+    log_std  = float(np.nanstd(log_valid))
+    if log_std < 1e-9:
+        return []
+
+    # Directional gradient strength (hull elongation proxy)
+    gx = sobel(norm, axis=1)
+    gy = sobel(norm, axis=0)
+    grad_mag = np.hypot(gx, gy)
+
+    # Find peaks above energy_threshold sigma
+    peak_mask = ((log_combined - log_mean) / log_std) > energy_threshold
+    peak_mask &= ~nodata_mask
+
+    peak_count = int(np.count_nonzero(peak_mask))
+    print(f"    [NUV] LoG blob peaks (energy>{energy_threshold}σ): {peak_count}")
+    if peak_count == 0:
+        return []
+
+    # Spatial filter to scan bbox
+    with rasterio.open(band_tif) as src:
+        rows, cols = np.where(peak_mask)
+        energies = ((log_combined[peak_mask] - log_mean) / log_std)
+        if scan_bbox is not None and len(rows) > 0:
+            xs_4326 = [scan_bbox[1], scan_bbox[1], scan_bbox[3], scan_bbox[3]]
+            ys_4326 = [scan_bbox[0], scan_bbox[2], scan_bbox[0], scan_bbox[2]]
+            xs_crs, ys_crs = warp_transform('EPSG:4326', src.crs, xs_4326, ys_4326)
+            bbox_rows, bbox_cols = [], []
+            for x, y in zip(xs_crs, ys_crs):
+                try:
+                    r, c = src.index(x, y)
+                    bbox_rows.append(r); bbox_cols.append(c)
+                except Exception:
+                    pass
+            if bbox_rows:
+                r_min = max(0, min(bbox_rows)); r_max = min(data.shape[0]-1, max(bbox_rows))
+                c_min = max(0, min(bbox_cols)); c_max = min(data.shape[1]-1, max(bbox_cols))
+                if r_min > r_max: r_min, r_max = r_max, r_min
+                if c_min > c_max: c_min, c_max = c_max, c_min
+                in_bbox = ((rows >= r_min) & (rows <= r_max) &
+                           (cols >= c_min) & (cols <= c_max))
+                rows = rows[in_bbox]; energies = energies[in_bbox]
+                cols_filt = cols[in_bbox]
+                cols = cols_filt
+                print(f"    [NUV] In-bbox peaks: {len(rows)}")
+
+        if len(rows) == 0:
+            return []
+
+        # Sort by energy, take top_n
+        sorted_idx = np.argsort(energies)[::-1][:top_n]
+        detections = []
+        for idx in sorted_idx:
+            r = int(rows[idx])
+            c = int(cols[idx])
+            lx, ly = src.xy(r, c)
+            lon_v, lat_v = warp_transform(src.crs, 'EPSG:4326', [lx], [ly])
+            energy = float(energies[idx])
+            dir_strength = float(grad_mag[r, c]) / (float(np.nanmean(grad_mag[~nodata_mask])) + 1e-9)
+            # 5x5 edge density
+            r0 = max(0, r-2); r1 = min(data.shape[0]-1, r+2)
+            c0 = max(0, c-2); c1 = min(data.shape[1]-1, c+2)
+            neigh = peak_mask[r0:r1+1, c0:c1+1]
+            edge_density = float(np.count_nonzero(neigh)) / max(neigh.size, 1)
+
+            known = _flag_known_wreck(lat_v[0], lon_v[0])
+            line5 = _flag_line5(lat_v[0], lon_v[0])
+            detections.append({
+                "lat":                    lat_v[0],
+                "lon":                    lon_v[0],
+                "zscore":                 energy,  # energy ratio as z-proxy
+                "type":                   "nauticuvs_candidate",
+                "source":                 band_tif.name,
+                "band_label":             band_label,
+                "nauticuvs_fdct_energy_ratio":   round(energy, 3),
+                "nauticuvs_directional_strength": round(dir_strength, 3),
+                "nauticuvs_edge_density":         round(edge_density, 3),
+                "known_wreck_hit":        known["id"]   if known else None,
+                "known_wreck_name":       known["name"] if known else None,
+                "line5_candidate":        line5,
+                "pixel":                  {"row": r, "col": c},
+            })
     return detections
 
 
@@ -470,15 +649,18 @@ def compute_stumpf_pass(blue_tif: Path, green_tif: Path,
 
 
 def process_tiff_with_coords(tiff_path: Path, threshold: float = 1.5,
-                              scan_bbox=None, top_n: int = 200):
+                              scan_bbox=None, top_n: int = 200,
+                              cold_sink_mode: bool = False):
     """
     Process TIFF on M2200 and extract coordinates using PROPER CRS transform.
     No anchor math - uses geotransform from file metadata.
     Handles UTM zone crossovers automatically via rasterio.warp.transform
 
-    scan_bbox: [lat_min, lon_min, lat_max, lon_max] to restrict anomaly collection
-               to the scan area (avoids land/cloud-edge noise from the rest of the tile).
-    top_n: max anomaly detections to return per file (sorted highest |z| first).
+    scan_bbox:      [lat_min, lon_min, lat_max, lon_max] to restrict anomaly collection.
+    top_n:          max anomaly detections to return per file (sorted highest |z| first).
+    cold_sink_mode: if True, detects NEGATIVE z only (z < -threshold).
+                    Use for B10 thermal — submerged steel retains cold, not heat.
+                    Default False = abs(z) > threshold (both directions).
     """
     from rasterio.warp import transform as warp_transform
     
@@ -514,7 +696,10 @@ def process_tiff_with_coords(tiff_path: Path, threshold: float = 1.5,
             data_gpu = cp.asarray(data)
             zscore_gpu = (data_gpu - mean_val) / std_val
             cp.cuda.Stream.null.synchronize()
-            anomaly_mask = (cp.abs(zscore_gpu) > threshold) & (~nodata_mask_gpu)
+            if cold_sink_mode:
+                anomaly_mask = (zscore_gpu < -threshold) & (~nodata_mask_gpu)
+            else:
+                anomaly_mask = (cp.abs(zscore_gpu) > threshold) & (~nodata_mask_gpu)
             anomaly_count = int(cp.count_nonzero(anomaly_mask))
             # Move mask to CPU for index extraction
             mask_cpu = cp.asnumpy(anomaly_mask)
@@ -522,7 +707,10 @@ def process_tiff_with_coords(tiff_path: Path, threshold: float = 1.5,
         else:
             # CPU path: pure NumPy, suppress nodata pixels
             zscore = (data - mean_val) / std_val
-            anomaly_mask = (np.abs(zscore) > threshold) & (~nodata_mask)
+            if cold_sink_mode:
+                anomaly_mask = (zscore < -threshold) & (~nodata_mask)
+            else:
+                anomaly_mask = (np.abs(zscore) > threshold) & (~nodata_mask)
             anomaly_count = int(np.count_nonzero(anomaly_mask))
             mask_cpu = anomaly_mask
             zscores_all = zscore[mask_cpu]
@@ -772,6 +960,7 @@ def main():
         repo_root / 'downloads' / 'hls',
         repo_root / 'downloads' / 'michigan',
         repo_root / 'downloads' / 'superior',
+        repo_root / 'downloads' / 'straits',
         repo_root / 'downloads' / 'huron',
         repo_root / 'downloads' / 'erie',
         repo_root / 'downloads' / 'ontario',
@@ -794,7 +983,8 @@ def main():
 
     # Straits of Mackinac scan bbox — constrains anomaly selection to water area
     # [lat_min, lon_min, lat_max, lon_max]
-    STRAITS_BBOX = [45.70, -84.80, 46.05, -84.10]
+    # Extended west to -84.90 to include Eber Ward (-84.819) and Sandusky (-84.837)
+    STRAITS_BBOX = [45.70, -84.90, 46.05, -84.10]
 
     # ── PASS 1: Standard anomaly scan (thermal / optical / SAR) ──────────────
     # Notes:
@@ -808,13 +998,28 @@ def main():
     standard_tiffs = [t for t in tiffs if
                       not any(tag in t.name.upper() for tag in _SKIP_UPPER)]
 
-    print(f"PASS 1 — Standard anomaly scan ({len(standard_tiffs)} bands, threshold=1.5)")
+    print(f"PASS 1 — Standard anomaly scan ({len(standard_tiffs)} bands, threshold=band-adaptive)")
     print("-"*60)
     for i, tiff in enumerate(standard_tiffs, 1):
         print(f"[{i}/{len(standard_tiffs)}] {tiff.name}")
+        tname_upper = tiff.name.upper()
+        # Band-adaptive thresholds:
+        #   B10 thermal → cold-sink only (submerged steel retains cold), z < -2.0
+        #   B02 blue    → 1.2 (deep penetration in Lake Michigan clarity up to ~55m/180ft)
+        #   all others  → 1.5 default
+        is_thermal = ('B10' in tname_upper or 'THERMAL' in tname_upper or
+                      'LWIR' in tname_upper or 'ST_B10' in tname_upper)
+        is_blue    = ('.B02.' in tname_upper or '.BLUE.' in tname_upper)
+        if is_thermal:
+            band_thresh, cold_sink = 2.0, True
+        elif is_blue:
+            band_thresh, cold_sink = 1.2, False
+        else:
+            band_thresh, cold_sink = 1.5, False
         try:
             detections = process_tiff_with_coords(
-                tiff, threshold=1.5, scan_bbox=STRAITS_BBOX, top_n=200)
+                tiff, threshold=band_thresh, scan_bbox=STRAITS_BBOX,
+                top_n=200, cold_sink_mode=cold_sink)
             all_detections.extend(detections)
         except Exception as e:
             print(f"    ERROR: {e}")
@@ -871,12 +1076,44 @@ def main():
         except Exception as e:
             print(f"    [ST] ERROR: {e}")
 
+    # ── PASS 4: NauticUVs LoG blob scan ──────────────────────────────────────
+    # Multi-scale Laplacian-of-Gaussian blob detection on B02 (surface disturbance /
+    # subsurface reflectance) and B10 thermal (cold plume over submerged steel).
+    # Approximates FDCT curvelet energy from NauticUVs (schema: nauticuvs_* columns).
+    # Detects hull-scale features (45-120m / 1.5-4 px at 30m) even when hull is below
+    # the optical floor — the upwelling/cold-plume surface expression is in range.
+    try:
+        from scipy.ndimage import gaussian_laplace  # noqa — just test availability
+        nuv_bands = (
+            [t for t in tiffs if ('.B02.' in t.name.upper() or '.BLUE.' in t.name.upper())
+             and 'FMASK' not in t.name.upper() and '.SCL.' not in t.name.upper()] +
+            [t for t in tiffs if ('B10' in t.name.upper() or 'THERMAL' in t.name.upper()
+             or 'LWIR' in t.name.upper())
+             and 'FMASK' not in t.name.upper() and '.SCL.' not in t.name.upper()]
+        )
+        print()
+        print(f"PASS 4 — NauticUVs LoG blob scan ({len(nuv_bands)} bands: B02+B10)")
+        print("-"*60)
+        for nuv_tif in nuv_bands:
+            print(f"  {nuv_tif.name}")
+            try:
+                nuv_dets = compute_nauticuvs_pass(nuv_tif, scan_bbox=STRAITS_BBOX)
+                all_detections.extend(nuv_dets)
+            except Exception as e:
+                print(f"    [NUV] ERROR: {e}")
+    except ImportError:
+        print()
+        print("PASS 4 — NauticUVs LoG SKIPPED (pip install scipy)")
+
     # ── Summary ───────────────────────────────────────────────────────────────
     wreck_hits   = [d for d in all_detections if d.get("known_wreck_hit")]
     hc_hits      = [d for d in all_detections if d.get("type") == "hydrocarbon"]
     stumpf_hits  = [d for d in all_detections if d.get("type") == "stumpf_shallow"]
+    nuv_hits     = [d for d in all_detections if d.get("type") == "nauticuvs_candidate"]
     line5_hits   = [d for d in all_detections if d.get("line5_candidate")]
-    unknown_wreck = [d for d in all_detections if d.get("type") not in ("hydrocarbon", "stumpf_shallow") and not d.get("known_wreck_hit")]
+    unknown_wreck = [d for d in all_detections if d.get("type") not in
+                     ("hydrocarbon", "stumpf_shallow", "nauticuvs_candidate")
+                     and not d.get("known_wreck_hit")]
 
     print()
     print("="*80)
@@ -887,6 +1124,7 @@ def main():
     print(f"  Unknown wreck candidates   : {len(unknown_wreck)}")
     print(f"  Hydrocarbon anomalies      : {len(hc_hits)}")
     print(f"  Stumpf shallow anomalies   : {len(stumpf_hits)}  ← zenith-corrected depth proxy")
+    print(f"  NauticUVs LoG candidates   : {len(nuv_hits)}  ← hull-scale surface disturbance")
     print(f"  Line 5 corridor flags      : {len(line5_hits)}")
     if wreck_hits:
         print()
@@ -916,6 +1154,8 @@ def main():
             "known_wreck_hits": len(wreck_hits),
             "unknown_wreck_candidates": len(unknown_wreck),
             "hydrocarbon_anomalies": len(hc_hits),
+            "stumpf_shallow": len(stumpf_hits),
+            "nauticuvs_candidates": len(nuv_hits),
             "line5_flags": len(line5_hits),
             "detections": all_detections,
         }, f, indent=2)

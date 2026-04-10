@@ -17,33 +17,32 @@ use serde::{Deserialize, Serialize};
 /// Resolve the cesarops-core directory relative to this binary's location.
 /// Falls back to the current working directory if not found.
 fn resolve_core_dir() -> PathBuf {
-    // Strategy 1: Check if we're running from within cesarops-core/tauri/
-    // → core is at ../..
+    // Strategy 1: Walk up from cwd. Covers:
+    //   dev:     tauri/ -> .. = cesarops-core/
+    //   release: tauri/src-tauri/target/release/ -> ../../../../ = cesarops-core/
     if let Ok(cwd) = std::env::current_dir() {
-        // Try going up from tauri/ → cesarops-core/
-        let candidate = cwd.join("..").canonicalize().ok();
-        if let Some(dir) = &candidate {
-            if dir.join("ai_director.py").exists() {
-                return dir.clone();
-            }
-        }
-        // Try going up two levels
-        let candidate2 = cwd.join("../..").canonicalize().ok();
-        if let Some(dir) = &candidate2 {
-            if dir.join("ai_director.py").exists() {
-                return dir.clone();
+        let up_paths = ["..", "../..", "../../..", "../../../..", "../../../../.."];
+        for rel in &up_paths {
+            if let Some(dir) = cwd.join(rel).canonicalize().ok() {
+                if dir.join("ai_director.py").exists() {
+                    return dir;
+                }
             }
         }
     }
 
-    // Strategy 2: Use the directory of the running executable
+    // Strategy 2: Walk up from the running executable (up to 6 levels).
+    // Release binary sits at tauri/src-tauri/target/release/ — 4 levels deep.
     if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            // Check if cesarops-core is next to the Tauri binary
-            let candidate = parent.join("../../cesarops-core").canonicalize().ok();
-            if let Some(dir) = &candidate {
-                if dir.join("ai_director.py").exists() {
-                    return dir.clone();
+        let mut dir = exe.clone();
+        for _ in 0..6 {
+            dir = match dir.parent() {
+                Some(p) => p.to_path_buf(),
+                None => break,
+            };
+            if let Ok(canonical) = dir.canonicalize() {
+                if canonical.join("ai_director.py").exists() {
+                    return canonical;
                 }
             }
         }
@@ -57,19 +56,27 @@ fn resolve_core_dir() -> PathBuf {
         }
     }
 
-    // Strategy 4: Check common user development paths
-    if let Ok(home) = std::env::var("USERPROFILE") {
-        let dev_paths = [
-            "programming/cesarops-core",
-            "Projects/cesarops-core",
-            "Desktop/cesarops-core",
-            "Documents/cesarops-core",
-        ];
-        for sub in &dev_paths {
-            let candidate = PathBuf::from(&home).join(sub).canonicalize().ok();
-            if let Some(dir) = &candidate {
-                if dir.join("ai_director.py").exists() {
-                    return dir.clone();
+    // Strategy 4: Check common user development paths (both USERPROFILE and HOME)
+    let home_vars = ["USERPROFILE", "HOME"];
+    for var in &home_vars {
+        if let Ok(home) = std::env::var(var) {
+            let dev_paths = [
+                "programming\\cesarops-core",
+                "programming/cesarops-core",
+                "Projects\\cesarops-core",
+                "Projects/cesarops-core",
+                "Desktop\\cesarops-core",
+                "Documents\\cesarops-core",
+            ];
+            for sub in &dev_paths {
+                let candidate = PathBuf::from(&home).join(sub);
+                if candidate.join("ai_director.py").exists() {
+                    return candidate;
+                }
+                if let Some(dir) = candidate.canonicalize().ok() {
+                    if dir.join("ai_director.py").exists() {
+                        return dir;
+                    }
                 }
             }
         }
@@ -81,7 +88,7 @@ fn resolve_core_dir() -> PathBuf {
 
 /// Resolve a user-provided work directory. If it's empty, relative (like ".."),
 /// or doesn't contain ai_director.py, use resolve_core_dir() instead.
-fn resolve_work_dir(user_dir: &str) -> PathBuf {
+pub(crate) fn resolve_work_dir(user_dir: &str) -> PathBuf {
     // If empty, use resolve_core_dir()
     if user_dir.is_empty() {
         return resolve_core_dir();
@@ -286,6 +293,13 @@ async fn check_nodes(
     ).await
 }
 
+/// Return the resolved absolute path to cesarops-core/ so the frontend
+/// can store it and pass it back in subsequent commands.
+#[tauri::command]
+fn get_work_dir() -> String {
+    resolve_core_dir().to_string_lossy().to_string()
+}
+
 /// List known wrecks
 #[tauri::command]
 async fn list_wrecks(work_dir: String) -> Result<String, String> {
@@ -313,6 +327,7 @@ pub fn run() {
             run_background_probe,
             check_nodes,
             list_wrecks,
+            get_work_dir,
             nasa_agent::search_nasa_granules,
             nasa_agent::trigger_swarm_download,
         ])

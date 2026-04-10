@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::process::Command;
-use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize)]
 pub struct SwarmRequest {
@@ -20,13 +19,7 @@ pub async fn search_nasa_granules(
     sensor: String,
 ) -> Result<serde_json::Value, String> {
     let python = if cfg!(windows) { "python" } else { "python3" };
-    let cwd = if work_dir.is_empty() {
-        std::env::current_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| ".".into())
-    } else {
-        work_dir.clone()
-    };
+    let cwd = crate::resolve_work_dir(if work_dir.is_empty() { "" } else { &work_dir });
 
     let bbox_str = bbox
         .iter()
@@ -35,7 +28,7 @@ pub async fn search_nasa_granules(
         .join(",");
 
     let output = Command::new(python)
-        .current_dir(PathBuf::from(&cwd))
+        .current_dir(&cwd)
         .arg("cmr_search.py")
         .arg("--bbox").arg(&bbox_str)
         .arg("--start").arg(&start_date)
@@ -63,10 +56,10 @@ pub async fn trigger_swarm_download(
     request: SwarmRequest,
 ) -> Result<String, String> {
     let python = if cfg!(windows) { "python" } else { "python3" };
-    let cwd = if work_dir.is_empty() { ".".to_string() } else { work_dir };
+    let cwd = crate::resolve_work_dir(if work_dir.is_empty() { "" } else { &work_dir });
 
     let output = Command::new(python)
-        .current_dir(PathBuf::from(cwd))
+        .current_dir(&cwd)
         .arg("batch_download_manager.py")
         .arg("--lakes").arg(&request.lake)
         .arg("--start").arg(request.year.to_string())

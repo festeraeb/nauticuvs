@@ -14,15 +14,18 @@ from pathlib import Path
 from datetime import datetime
 
 # Lake Bounding Boxes
+# NOTE: michigan stops at -85.5W; huron starts at -84.0W.
+# The Straits of Mackinac (~45.8N, -84.7W) falls in neither — use 'straits' explicitly.
 LAKES = {
-    'superior': {'bbox': [46.5, -92.0, 48.0, -84.5], 'label': 'Lake Superior'},
-    'michigan': {'bbox': [41.5, -88.0, 46.0, -85.5], 'label': 'Lake Michigan'},
-    'huron':    {'bbox': [42.5, -84.0, 46.0, -81.0], 'label': 'Lake Huron'},
-    'erie':     {'bbox': [41.3, -83.5, 42.5, -78.8], 'label': 'Lake Erie'},
-    'ontario':  {'bbox': [43.2, -79.5, 44.2, -76.0], 'label': 'Lake Ontario'},
+    'superior': {'bbox': [46.5, -92.0, 48.0, -84.5],  'label': 'Lake Superior'},
+    'michigan': {'bbox': [41.5, -88.0, 46.0, -85.5],  'label': 'Lake Michigan'},
+    'straits':  {'bbox': [45.65, -85.0, 46.10, -84.10], 'label': 'Straits of Mackinac'},
+    'huron':    {'bbox': [42.5, -84.0, 46.0, -81.0],  'label': 'Lake Huron'},
+    'erie':     {'bbox': [41.3, -83.5, 42.5, -78.8],  'label': 'Lake Erie'},
+    'ontario':  {'bbox': [43.2, -79.5, 44.2, -76.0],  'label': 'Lake Ontario'},
 }
 
-def run_download(lake_key, year, sensors='hls,sar', chunk_id=None, dry_run=False):
+def run_download(lake_key, year, sensors='hls,sar', chunk_id=None, dry_run=False, max_results=15):
     """Execute the universal downloader for a specific slice of data."""
     lake = LAKES.get(lake_key)
     if not lake: return
@@ -40,7 +43,7 @@ def run_download(lake_key, year, sensors='hls,sar', chunk_id=None, dry_run=False
         '--bbox', f"{b[0]},{b[1]},{b[2]},{b[3]}",
         '--dates', dates[0], dates[1],
         '--sensors', sensors,
-        '--max-results', '15',
+        '--max-results', str(max_results),
         '--output', str(out_dir)
     ]
 
@@ -64,6 +67,7 @@ def main():
     parser.add_argument('--start', type=int, default=2013)
     parser.add_argument('--end', type=int, default=2025)
     parser.add_argument('--sensors', default='hls,sar')
+    parser.add_argument('--max-results', type=int, default=15, help='Max granules per task (default 15)')
     parser.add_argument('--chunk-id', type=str, help='Node ID for parallel processing')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
@@ -85,7 +89,7 @@ def main():
 
     print(f"🚀 BATCH START: {len(chunks)} tasks for Node {args.chunk_id or 'Single'}")
     for task in chunks:
-        run_download(task['lake'], task['year'], args.sensors, args.chunk_id, args.dry_run)
+        run_download(task['lake'], task['year'], args.sensors, args.chunk_id, args.dry_run, args.max_results)
         time.sleep(2) # Rate limit courtesy of the API
 
 if __name__ == '__main__':

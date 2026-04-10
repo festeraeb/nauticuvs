@@ -18,11 +18,12 @@ export default function AgentPanel() {
   const [tasks, setTasks] = useState<TaskEntry[]>([]);
   const [workDir, setWorkDir] = useState("");
 
-  // Resolve work directory
+  // Resolve work directory — ask Rust for the absolute path so it works
+  // in both dev (tauri/) and release (tauri/src-tauri/target/release/) modes.
   useEffect(() => {
-    // Tauri runs from tauri/ dir in dev, so ".." = cesarops-core/
-    // But we need the absolute path for Windows
-    setWorkDir("../");
+    invoke<string>("get_work_dir")
+      .then((dir) => setWorkDir(dir))
+      .catch(() => setWorkDir("../"));  // fallback for hot-reload dev
   }, []);
 
   const addTask = (cmd: string, out: string, err: string, status: string) => {

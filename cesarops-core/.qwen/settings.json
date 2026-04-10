@@ -9,7 +9,17 @@
       "Bash(powershell *)",
       "Bash(do *)",
       "Bash(ssh-keygen *)",
-      "Bash(nslookup *)"
+      "Bash(nslookup *)",
+      "Bash(git add *)",
+      "Bash(git *)",
+      "Bash(findstr *)",
+      "Bash(nvidia-smi)",
+      "Bash(nvcc *)",
+      "Bash(python3 *)",
+      "Bash(pip3 list)",
+      "Bash(type *)",
+      "Bash(git commit *)",
+      "Bash(echo.)"
     ]
   },
   "$version": 3
