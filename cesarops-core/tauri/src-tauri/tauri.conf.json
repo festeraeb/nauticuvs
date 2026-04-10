@@ -26,10 +26,22 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZFNTY1MThFQTI4RTRGRjcKUldUM1Q0NmlqbEZXL2lONlRwU1Z4SmlVeGJQQVpYMzA0TUg3NlN6Q0phMXdIWGZHOEJKa0tKcU4K",
+      "endpoints": [
+        "https://github.com/YOUR_USERNAME/cesarops-core/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

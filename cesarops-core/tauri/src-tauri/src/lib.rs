@@ -9,8 +9,11 @@
 
 mod nasa_agent;
 
+use std::collections::HashMap;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::Duration;
 use tauri::Emitter;
 use serde::{Deserialize, Serialize};
 
@@ -148,14 +151,203 @@ pub struct TaskOutput {
     pub duration_s: f64,
 }
 
-/// Spawn a Python script and stream output to the frontend
+fn load_dotenv_map(work_dir: &PathBuf) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let path = work_dir.join(".env");
+    let content = match std::fs::read_to_string(path) {
+        Ok(v) => v,
+        Err(_) => return map,
+    };
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = trimmed.split_once('=') {
+            map.insert(k.trim().to_string(), v.trim().to_string());
+        }
+    }
+
+    map
+}
+
+fn env_or_dotenv(dotenv: &HashMap<String, String>, key: &str) -> Option<String> {
+    std::env::var(key).ok().or_else(|| dotenv.get(key).cloned())
+}
+
+fn provider_runtime_config(
+    provider: &str,
+    work_dir: &PathBuf,
+    model_override: Option<&str>,
+) -> Result<(String, String, bool), String> {
+    let dotenv = load_dotenv_map(work_dir);
+    let normalized_override = model_override
+        .map(|m| m.trim())
+        .filter(|m| !m.is_empty())
+        .map(|m| m.to_string());
+
+    match provider {
+        "qwen" => {
+            let base = env_or_dotenv(&dotenv, "QWEN_BASE_URL")
+                .unwrap_or_else(|| "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string());
+            let model = normalized_override.unwrap_or_else(|| {
+                env_or_dotenv(&dotenv, "QWEN_MODEL")
+                    .unwrap_or_else(|| "qwen-plus".to_string())
+            });
+            let has_key = env_or_dotenv(&dotenv, "QWEN_API_KEY").is_some();
+            Ok((base, model, has_key))
+        }
+        "koboldcpp" => {
+            let base = env_or_dotenv(&dotenv, "KOBOLDCPP_BASE_URL")
+                .unwrap_or_else(|| "http://127.0.0.1:5001/v1".to_string());
+            let model = normalized_override.unwrap_or_else(|| {
+                env_or_dotenv(&dotenv, "KOBOLDCPP_MODEL")
+                    .unwrap_or_else(|| "DeepSeek-R1-Distill-Qwen-7B".to_string())
+            });
+            let has_key = env_or_dotenv(&dotenv, "KOBOLDCPP_API_KEY").is_some();
+            Ok((base, model, has_key))
+        }
+        "github_sdk" => {
+            let base = env_or_dotenv(&dotenv, "GITHUB_AGENT_BASE_URL")
+                .unwrap_or_else(|| "http://127.0.0.1:8080/v1".to_string());
+            let model = normalized_override.unwrap_or_else(|| {
+                env_or_dotenv(&dotenv, "GITHUB_AGENT_MODEL")
+                    .unwrap_or_else(|| "gpt-4.1".to_string())
+            });
+            let has_key = env_or_dotenv(&dotenv, "GITHUB_AGENT_API_KEY").is_some();
+            Ok((base, model, has_key))
+        }
+        _ => Err(format!(
+            "Unknown provider '{}'. Expected one of: qwen, koboldcpp, github_sdk",
+            provider
+        )),
+    }
+}
+
+fn parse_host_port(base_url: &str) -> Option<(String, u16)> {
+    let (default_port, stripped) = if let Some(s) = base_url.strip_prefix("https://") {
+        (443u16, s)
+    } else if let Some(s) = base_url.strip_prefix("http://") {
+        (80u16, s)
+    } else {
+        (80u16, base_url)
+    };
+
+    let host_port = stripped.split('/').next()?.trim();
+    if host_port.is_empty() {
+        return None;
+    }
+
+    if let Some((host, port_str)) = host_port.rsplit_once(':') {
+        if let Ok(port) = port_str.parse::<u16>() {
+            return Some((host.to_string(), port));
+        }
+    }
+
+    Some((host_port.to_string(), default_port))
+}
+
+fn tcp_reachable(base_url: &str) -> bool {
+    let (host, port) = match parse_host_port(base_url) {
+        Some(v) => v,
+        None => return false,
+    };
+
+    let addr = format!("{}:{}", host, port);
+    let addrs = match addr.to_socket_addrs() {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+
+    for a in addrs {
+        if TcpStream::connect_timeout(&a, Duration::from_millis(1200)).is_ok() {
+            return true;
+        }
+    }
+    false
+}
+
+fn agent_provider_env(
+    provider: &str,
+    work_dir: &PathBuf,
+    model_override: Option<&str>,
+) -> Result<HashMap<String, String>, String> {
+    let mut env = HashMap::new();
+    let dotenv = load_dotenv_map(work_dir);
+    let (base, model, has_key) = provider_runtime_config(provider, work_dir, model_override)?;
+
+    match provider {
+        "qwen" => {
+            // Use existing .env/QWEN_* values with no override.
+        }
+        "koboldcpp" => {
+            env.insert("QWEN_BASE_URL".to_string(), base);
+            env.insert("QWEN_MODEL".to_string(), model);
+            env.insert(
+                "QWEN_API_KEY".to_string(),
+                if has_key {
+                    env_or_dotenv(&dotenv, "KOBOLDCPP_API_KEY").unwrap_or_else(|| "local".to_string())
+                } else {
+                    "local".to_string()
+                },
+            );
+        }
+        "github_sdk" => {
+            env.insert("QWEN_BASE_URL".to_string(), base);
+            env.insert("QWEN_MODEL".to_string(), model);
+            env.insert(
+                "QWEN_API_KEY".to_string(),
+                if has_key {
+                    env_or_dotenv(&dotenv, "GITHUB_AGENT_API_KEY").unwrap_or_else(|| "local".to_string())
+                } else {
+                    "local".to_string()
+                },
+            );
+        }
+        _ => {
+            return Err(format!(
+                "Unknown provider '{}'. Expected one of: qwen, koboldcpp, github_sdk",
+                provider
+            ));
+        }
+    }
+
+    Ok(env)
+}
+
+/// Check provider endpoint configuration and reachability.
 #[tauri::command]
-async fn run_task(
+async fn agent_provider_status(
+    provider: Option<String>,
+    work_dir: String,
+    model_override: Option<String>,
+) -> Result<String, String> {
+    let actual_work_dir = resolve_work_dir(&work_dir);
+    let selected_provider = provider.unwrap_or_else(|| "qwen".to_string());
+    let (base, model, has_key) = provider_runtime_config(
+        &selected_provider,
+        &actual_work_dir,
+        model_override.as_deref(),
+    )?;
+    let reachable = tcp_reachable(&base);
+
+    let key_status = if has_key { "present" } else { "missing (or using local default)" };
+    let reachability = if reachable { "reachable" } else { "not reachable" };
+
+    Ok(format!(
+        "Provider: {}\nBase URL: {}\nModel: {}\nAPI key: {}\nEndpoint: {}",
+        selected_provider, base, model, key_status, reachability
+    ))
+}
+
+async fn run_python_task(
     app: tauri::AppHandle,
     task_id: String,
     script: String,
     args: Vec<String>,
     cwd: Option<String>,
+    extra_env: Option<HashMap<String, String>>,
 ) -> Result<TaskOutput, String> {
     let start = std::time::Instant::now();
 
@@ -174,6 +366,11 @@ async fn run_task(
     let mut cmd = Command::new(python);
     cmd.current_dir(&work_dir);
     cmd.env("PYTHONIOENCODING", "utf-8");  // Force UTF-8 output
+    if let Some(env_vars) = extra_env {
+        for (k, v) in env_vars {
+            cmd.env(k, v);
+        }
+    }
     cmd.arg(&script);
     cmd.args(&args);
     cmd.stdout(std::process::Stdio::piped());
@@ -241,21 +438,38 @@ async fn run_task(
     Ok(output)
 }
 
+/// Spawn a Python script and stream output to the frontend
+#[tauri::command]
+async fn run_task(
+    app: tauri::AppHandle,
+    task_id: String,
+    script: String,
+    args: Vec<String>,
+    cwd: Option<String>,
+) -> Result<TaskOutput, String> {
+    run_python_task(app, task_id, script, args, cwd, None).await
+}
+
 /// Run an AI Director request
 #[tauri::command]
 async fn ai_direct_request(
     app: tauri::AppHandle,
     request: String,
     work_dir: String,
+    provider: Option<String>,
+    model_override: Option<String>,
 ) -> Result<TaskOutput, String> {
     let actual_work_dir = resolve_work_dir(&work_dir);
+    let selected_provider = provider.unwrap_or_else(|| "qwen".to_string());
+    let env = agent_provider_env(&selected_provider, &actual_work_dir, model_override.as_deref())?;
 
-    run_task(
+    run_python_task(
         app,
         "ai_direct".into(),
         "ai_director.py".into(),
         vec!["--request".into(), request, "--execute".into()],
         Some(actual_work_dir.to_string_lossy().to_string()),
+        Some(env),
     ).await
 }
 
@@ -321,9 +535,12 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             run_task,
             ai_direct_request,
+            agent_provider_status,
             run_background_probe,
             check_nodes,
             list_wrecks,

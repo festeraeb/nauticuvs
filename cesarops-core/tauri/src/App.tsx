@@ -16,6 +16,7 @@ import LoranPanel from "./components/LoranPanel";
 import ExtendedSensorsPanel from "./components/ExtendedSensorsPanel";
 import HarvesterPanel from "./components/HarvesterPanel";
 import AutoBagPrompt from "./components/AutoBagPrompt";
+import UpdateChecker from "./components/UpdateChecker";
 import { getApiBase, resetConnectionState } from "./services/api";
 import "./styles/global.css";
 
@@ -73,6 +74,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <UpdateChecker />
       <AutoBagPrompt />
       {/* ── Top bar ────────────────────────────────────── */}
       <div className="topbar">
